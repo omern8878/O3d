@@ -18,7 +18,8 @@ export class GpuContext {
   readonly context: GPUCanvasContext;
   readonly canvas: HTMLCanvasElement;
   readonly format: GPUTextureFormat;
-  private readonly defaultClearColor: ClearColor;
+  /** Color used to clear frames unless a caller overrides it. */
+  readonly clearColor: ClearColor;
 
   private constructor(
     adapter: GPUAdapter,
@@ -33,7 +34,7 @@ export class GpuContext {
     this.context = context;
     this.canvas = config.canvas;
     this.format = format;
-    this.defaultClearColor = config.clearColor ?? DEFAULT_CLEAR_COLOR;
+    this.clearColor = config.clearColor ?? DEFAULT_CLEAR_COLOR;
   }
 
   /**
@@ -86,7 +87,7 @@ export class GpuContext {
   }
 
   /** Clears the current frame to `color` (or the configured clear color). */
-  clearFrame(color: ClearColor = this.defaultClearColor): void {
+  clearFrame(color: ClearColor = this.clearColor): void {
     const encoder = this.device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
       colorAttachments: [
