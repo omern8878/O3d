@@ -1,13 +1,14 @@
 import { wasm_memory, type Camera } from "@engine/core/pkg/engine.js";
 import { QuadGeometry } from "../geometry/quad-geometry.ts";
+import { BYTES_PER_FLOAT, BYTES_PER_VEC3 } from "../memory/vec3-layout.ts";
 import type { EntityManager } from "../scene/entity-manager.ts";
 import { CameraUniformBuffer } from "./camera-uniform-buffer.ts";
 import { GpuInstanceBuffers } from "./gpu-buffer-sync.ts";
 import type { GpuContext } from "./gpu-context.ts";
 import { INSTANCED_QUAD_WGSL } from "./shaders/instanced-quad.wgsl.ts";
 
-const VEC2_STRIDE = 2 * 4;
-const VEC3_STRIDE = 3 * 4;
+const VEC2_STRIDE = 2 * BYTES_PER_FLOAT;
+const VEC3_STRIDE = BYTES_PER_VEC3;
 const IDENTITY_MATRIX = new Float32Array([
   1, 0, 0, 0,
   0, 1, 0, 0,

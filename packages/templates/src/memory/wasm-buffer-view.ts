@@ -1,7 +1,6 @@
 import type { EntityBuffer } from "@engine/core/pkg/engine.js";
 import type { Vec3 } from "../types/entity.types.ts";
-
-const FLOATS_PER_VEC3 = 3;
+import { FLOATS_PER_VEC3 } from "./vec3-layout.ts";
 
 /**
  * Owns the zero-copy `Float32Array` views over an `EntityBuffer`'s Wasm memory.

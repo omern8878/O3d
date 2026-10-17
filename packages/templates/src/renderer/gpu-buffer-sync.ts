@@ -1,4 +1,9 @@
 import type { ChannelType } from "../memory/dirty-tracker.ts";
+import {
+  BYTES_PER_FLOAT,
+  BYTES_PER_VEC3,
+  FLOATS_PER_VEC3,
+} from "../memory/vec3-layout.ts";
 import type { EntityManager } from "../scene/entity-manager.ts";
 
 /** The slice of `EntityManager` this class reads from. */
@@ -6,10 +11,6 @@ type InstanceSource = Pick<
   EntityManager,
   "getActiveCount" | "getCapacity" | "getRawViews" | "getDirtyTracker"
 >;
-
-const FLOATS_PER_VEC3 = 3;
-const BYTES_PER_FLOAT = 4;
-const BYTES_PER_INSTANCE = FLOATS_PER_VEC3 * BYTES_PER_FLOAT;
 
 /**
  * Per-instance `positions`, `scales` and `colors` vertex buffers in VRAM, kept
@@ -105,7 +106,7 @@ export class GpuInstanceBuffers {
   private createBuffer(label: string): GPUBuffer {
     return this.device.createBuffer({
       label,
-      size: this.gpuCapacity * BYTES_PER_INSTANCE,
+      size: this.gpuCapacity * BYTES_PER_VEC3,
       // Read lazily: `GPUBufferUsage` does not exist where WebGPU is unsupported.
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });

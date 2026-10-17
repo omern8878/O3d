@@ -1,5 +1,6 @@
 import { EntityBuffer, wasm_memory } from "@engine/core/pkg/engine.js";
 import { DirtyTracker } from "../memory/dirty-tracker.ts";
+import { FLOATS_PER_VEC3 } from "../memory/vec3-layout.ts";
 import { WasmBufferView } from "../memory/wasm-buffer-view.ts";
 import type {
   EntityId,
@@ -7,8 +8,6 @@ import type {
   RawEntityViews,
 } from "../types/entity.types.ts";
 import { parseColor } from "../utils/color.utils.ts";
-
-const FLOATS_PER_VEC3 = 3;
 
 /**
  * Developer-facing facade for creating, updating and removing entities.

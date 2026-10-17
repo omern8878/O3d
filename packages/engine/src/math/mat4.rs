@@ -9,7 +9,7 @@
 //! - Projections map depth to WebGPU's `[0, 1]` range (`_rh_zo`), not OpenGL's
 //!   `[-1, 1]`.
 
-const EPSILON: f32 = 1e-6;
+use super::vec3::{cross, dot, normalize, sub};
 
 /// A 4x4 `f32` matrix in column-major order.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -98,31 +98,6 @@ impl Mat4 {
         let component = |row: usize| m[row] * x + m[4 + row] * y + m[8 + row] * z + m[12 + row];
         [component(0), component(1), component(2), component(3)]
     }
-}
-
-fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
-}
-
-fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
-}
-
-/// Unit-length copy of `v`, or the zero vector if `v` is (nearly) zero.
-fn normalize(v: [f32; 3]) -> [f32; 3] {
-    let length = dot(v, v).sqrt();
-    if length < EPSILON {
-        return [0.0; 3];
-    }
-    [v[0] / length, v[1] / length, v[2] / length]
 }
 
 #[cfg(test)]
