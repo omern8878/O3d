@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Camera, initSync, wasm_memory } from "@engine/core/pkg/engine.js";
+import { CameraController } from "../scene/camera-controller.ts";
 import { EntityManager } from "../scene/entity-manager.ts";
 import { createMockDevice, installMockGpuGlobals } from "../testing/mock-gpu.ts";
 import { createMockGpuContext } from "../testing/mock-gpu-context.ts";
@@ -154,5 +155,23 @@ describe("engine end-to-end guarantees", () => {
       assert.ok(methods.indexOf("setBindGroup") < methods.indexOf("draw"));
     }
     assert.equal(lastPass().calls.filter((c) => c.method === "setVertexBuffer").length, 4);
+  });
+
+  it("Guarantee 6: CameraController uploads the 64-byte uniform only when the camera changed", () => {
+    const controller = new CameraController({ aspect: 1.5 });
+    assert.equal(controller.syncIfDirty(renderer), true);
+    renderer.render(manager);
+    device.writes.length = 0;
+
+    assert.equal(controller.syncIfDirty(renderer), false);
+    renderer.render(manager);
+    assert.equal(device.writes.length, 0, "clean camera and scene: 0 bytes uploaded");
+
+    controller.panByPixels(30, -10, 600);
+    assert.equal(controller.syncIfDirty(renderer), true);
+    renderer.render(manager);
+
+    assert.equal(bytes(uniformWrites()), 64);
+    assert.equal(bytes(instanceWrites()), 0);
   });
 });

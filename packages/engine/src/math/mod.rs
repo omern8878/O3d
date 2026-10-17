@@ -2,4 +2,5 @@
 
 pub mod camera;
 pub mod mat4;
+pub mod spherical;
 pub mod vec3;
