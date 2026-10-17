@@ -1,0 +1,6 @@
+{
+  "name": "@engine/core",
+  "version": "1.0.0",
+  "module": "pkg/engine.js",
+  "type": "module"
+}

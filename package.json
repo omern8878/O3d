@@ -1,0 +1,8 @@
+{
+  "name": "wasm-rendering-engine",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "build:wasm": "cd packages/engine && wasm-pack build --target web"
+  }
+}
