@@ -1,9 +1,10 @@
-import init, { init_engine } from '@engine/core/pkg/engine.js'
+import init from '@engine/core/pkg/engine.js'
+import { runMemoryDiagnostics } from './diagnostics/memory-suite.ts'
 import './style.css'
 
 async function main() {
   await init()
-  console.log(init_engine())
+  runMemoryDiagnostics()
 }
 
-main().catch((err) => console.error('Failed to initialize engine:', err))
+main().catch((err) => console.error('Playground failed:', err))
