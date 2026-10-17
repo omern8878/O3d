@@ -3,14 +3,26 @@
 //! JS reads the matrix zero-copy through [`Camera::view_proj_ptr`] (16 `f32`s,
 //! column-major) and uploads it to a uniform buffer.
 
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 use wasm_bindgen::prelude::*;
 
 use super::mat4::Mat4;
+use super::spherical::Spherical;
+use super::vec3::{add, sub};
 
 /// Smallest allowed orthographic half-height; keeps the projection invertible.
 const MIN_ORTHO_HALF_HEIGHT: f32 = 0.0001;
+
+/// Keeps orbit elevation just short of the poles, where `look_at` would flip.
+const MAX_ORBIT_ELEVATION: f32 = FRAC_PI_2 - 0.01;
+
+/// Smallest accepted zoom factor; keeps zoom from collapsing to zero.
+const MIN_ZOOM_FACTOR: f32 = 0.001;
+
+/// Perspective zoom keeps the eye within these multiples of near / far.
+const MIN_ORBIT_RADIUS_IN_NEARS: f32 = 2.0;
+const MAX_ORBIT_RADIUS_IN_FARS: f32 = 0.9;
 
 /// How the camera projects the scene.
 #[wasm_bindgen]
@@ -90,6 +102,55 @@ impl Camera {
         self.target[0] += dx;
         self.target[1] += dy;
         self.update_view_proj();
+    }
+
+    /// Orbits the eye around `target` on a sphere, keeping the distance.
+    /// Elevation is clamped just short of straight up / down.
+    pub fn orbit_3d(&mut self, delta_azimuth: f32, delta_elevation: f32) {
+        let Some(mut spherical) = Spherical::from_offset(sub(self.eye, self.target)) else {
+            return;
+        };
+        spherical.azimuth += delta_azimuth;
+        spherical.elevation = (spherical.elevation + delta_elevation)
+            .clamp(-MAX_ORBIT_ELEVATION, MAX_ORBIT_ELEVATION);
+
+        self.eye = add(self.target, spherical.to_offset());
+        self.update_view_proj();
+    }
+
+    /// Zooms by multiplying the visible size (`Ortho2D`) or the eye-target
+    /// distance (`Perspective3D`) by `factor`. Factors below `0.001` are
+    /// raised to it, so `factor < 1` zooms in and `factor > 1` zooms out.
+    pub fn zoom_by_factor(&mut self, factor: f32) {
+        let factor = factor.max(MIN_ZOOM_FACTOR);
+
+        match self.mode {
+            ProjectionMode::Ortho2D => {
+                self.ortho_half_height =
+                    (self.ortho_half_height * factor).max(MIN_ORTHO_HALF_HEIGHT);
+            }
+            ProjectionMode::Perspective3D => {
+                let Some(mut spherical) = Spherical::from_offset(sub(self.eye, self.target))
+                else {
+                    return;
+                };
+                spherical.radius = (spherical.radius * factor).clamp(
+                    self.near * MIN_ORBIT_RADIUS_IN_NEARS,
+                    self.far * MAX_ORBIT_RADIUS_IN_FARS,
+                );
+                self.eye = add(self.target, spherical.to_offset());
+            }
+        }
+        self.update_view_proj();
+    }
+
+    /// World units from the view center to the top edge in `Ortho2D` mode.
+    pub fn ortho_half_height(&self) -> f32 {
+        self.ortho_half_height
+    }
+
+    pub fn aspect(&self) -> f32 {
+        self.aspect
     }
 
     /// Pointer to the 16 column-major `f32`s of the combined view-projection.
@@ -228,6 +289,109 @@ mod tests {
         camera.set_target(5.0, 0.0, 0.0);
 
         assert_close(&to_clip(&camera, [5.0, 0.0, 0.0])[..2], &[0.0, 0.0]);
+    }
+
+    fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+        let d = sub(a, b);
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+    }
+
+    #[test]
+    fn orbit_3d_preserves_the_distance_to_the_target() {
+        let mut camera = Camera::new(1.0);
+        camera.set_target(1.0, 2.0, 3.0);
+        camera.set_position(4.0, 6.0, 15.0);
+        let radius = distance(camera.eye, camera.target);
+
+        camera.orbit_3d(0.7, 0.3);
+        camera.orbit_3d(-2.0, -0.4);
+
+        assert!((distance(camera.eye, camera.target) - radius).abs() < 1e-4);
+    }
+
+    #[test]
+    fn orbit_3d_quarter_turn_moves_the_eye_from_plus_z_to_plus_x() {
+        let mut camera = Camera::new(1.0);
+
+        camera.orbit_3d(FRAC_PI_2, 0.0);
+
+        assert_close(&camera.eye, &[10.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn orbit_3d_clamps_elevation_short_of_the_poles() {
+        let mut camera = Camera::new(1.0);
+
+        camera.orbit_3d(0.0, 10.0);
+        let up = sub(camera.eye, camera.target)[1] / distance(camera.eye, camera.target);
+        assert!((up - MAX_ORBIT_ELEVATION.sin()).abs() < 1e-5);
+        assert!(up < 1.0);
+
+        camera.orbit_3d(0.0, -100.0);
+        let down = sub(camera.eye, camera.target)[1] / distance(camera.eye, camera.target);
+        assert!((down + MAX_ORBIT_ELEVATION.sin()).abs() < 1e-5);
+        assert!(camera.view_proj().0.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn orbit_3d_with_the_eye_on_the_target_does_nothing() {
+        let mut camera = Camera::new(1.0);
+        camera.set_position(0.0, 0.0, 0.0);
+        camera.orbit_3d(1.0, 1.0);
+
+        assert_eq!(camera.eye, [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn zoom_by_factor_scales_the_ortho_half_height() {
+        let mut camera = Camera::new(1.0);
+
+        camera.zoom_by_factor(0.5);
+        assert_close(&[camera.ortho_half_height()], &[50.0]);
+
+        camera.zoom_by_factor(4.0);
+        assert_close(&[camera.ortho_half_height()], &[200.0]);
+    }
+
+    #[test]
+    fn zoom_by_factor_clamps_non_positive_factors() {
+        let mut camera = Camera::new(1.0);
+        camera.zoom_by_factor(-3.0);
+
+        assert_close(&[camera.ortho_half_height()], &[100.0 * MIN_ZOOM_FACTOR]);
+    }
+
+    #[test]
+    fn zoom_by_factor_scales_the_perspective_distance() {
+        let mut camera = Camera::new(1.0);
+        camera.set_mode(ProjectionMode::Perspective3D);
+
+        camera.zoom_by_factor(2.0);
+        assert_close(&[distance(camera.eye, camera.target)], &[20.0]);
+        assert_close(&[camera.ortho_half_height()], &[100.0]);
+
+        camera.zoom_by_factor(0.25);
+        assert_close(&[distance(camera.eye, camera.target)], &[5.0]);
+    }
+
+    #[test]
+    fn perspective_zoom_is_limited_by_near_and_far() {
+        let mut camera = Camera::new(1.0);
+        camera.set_mode(ProjectionMode::Perspective3D);
+
+        camera.zoom_by_factor(MIN_ZOOM_FACTOR);
+        assert_close(&[distance(camera.eye, camera.target)], &[0.2]);
+
+        camera.zoom_by_factor(1.0e9);
+        assert_close(&[distance(camera.eye, camera.target)], &[900.0]);
+    }
+
+    #[test]
+    fn getters_report_current_settings() {
+        let mut camera = Camera::new(1.5);
+        camera.set_ortho_zoom(40.0);
+
+        assert_close(&[camera.aspect(), camera.ortho_half_height()], &[1.5, 40.0]);
     }
 
     #[test]
