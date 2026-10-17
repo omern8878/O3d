@@ -1,4 +1,15 @@
 {
   "name": "@engine/templates",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@engine/core": "*"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2"
+  }
 }
