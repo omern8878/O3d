@@ -3,8 +3,10 @@
 
 pub mod ecs;
 pub mod init;
+pub mod math;
 pub mod memory;
 
 pub use ecs::entity_buffer::EntityBuffer;
 pub use init::init_engine;
+pub use math::camera::{Camera, ProjectionMode};
 pub use memory::wasm_memory;
