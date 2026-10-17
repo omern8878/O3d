@@ -1,7 +1,8 @@
 import type { Camera } from "@engine/core/pkg/engine.js";
+import { BYTES_PER_FLOAT } from "../memory/vec3-layout.ts";
 
 const MATRIX_FLOATS = 16;
-const MATRIX_BYTES = MATRIX_FLOATS * 4;
+const MATRIX_BYTES = MATRIX_FLOATS * BYTES_PER_FLOAT;
 
 /**
  * A 64-byte uniform buffer holding the camera's column-major `view_proj`
