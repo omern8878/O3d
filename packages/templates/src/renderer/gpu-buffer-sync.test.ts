@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
+import { DirtyTracker } from "../memory/dirty-tracker.ts";
 import { createMockDevice, installMockGpuGlobals } from "../testing/mock-gpu.ts";
 
 const BYTES_PER_INSTANCE = 12;
@@ -9,9 +10,13 @@ type Source = Parameters<
   InstanceType<typeof import("./gpu-buffer-sync.ts").GpuInstanceBuffers>["syncFromEntities"]
 >[0];
 
+/** A source whose `activeCount` entities are all freshly dirty. */
 function fakeSource(activeCount: number, capacity: number): Source {
   const floats = (n: number) => new Float32Array(n * 3).map((_, i) => i + 1);
+  const dirtyTracker = new DirtyTracker();
+  for (let i = 0; i < activeCount; i++) dirtyTracker.markAllChannelsDirty(i);
   return {
+    getDirtyTracker: () => dirtyTracker,
     getActiveCount: () => activeCount,
     getCapacity: () => capacity,
     getRawViews: () => ({

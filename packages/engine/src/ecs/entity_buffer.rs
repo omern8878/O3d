@@ -26,6 +26,9 @@ use super::sparse_set::SparseSet;
 /// Number of `f32` components stored per entity in each attribute array.
 const FLOATS_PER_VEC3: usize = 3;
 
+/// Returned by `remove_entity` when no remaining dense slot was overwritten.
+const NO_SLOT_OVERWRITTEN: isize = -1;
+
 const DEFAULT_POSITION: [f32; 3] = [0.0, 0.0, 0.0];
 const DEFAULT_SCALE: [f32; 3] = [1.0, 1.0, 1.0];
 const DEFAULT_COLOR: [f32; 3] = [0.0, 0.0, 0.0];
@@ -75,11 +78,24 @@ impl EntityBuffer {
     }
 
     /// Destroys an entity, keeping the arrays gap-free. Invalid IDs are ignored.
-    pub fn remove_entity(&mut self, entity_id: usize) {
-        if let Some((removed_idx, last_idx)) = self.index.remove(entity_id) {
-            Self::swap_remove_vec3(&mut self.positions, removed_idx, last_idx);
-            Self::swap_remove_vec3(&mut self.scales, removed_idx, last_idx);
-            Self::swap_remove_vec3(&mut self.colors, removed_idx, last_idx);
+    ///
+    /// Returns the dense index whose data was overwritten by the swap, so
+    /// callers can mark it dirty. Returns [`NO_SLOT_OVERWRITTEN`] (`-1`) if the
+    /// ID was invalid, or if the removed entity was the last one and was simply
+    /// popped (no remaining slot changed).
+    pub fn remove_entity(&mut self, entity_id: usize) -> isize {
+        let Some((removed_idx, last_idx)) = self.index.remove(entity_id) else {
+            return NO_SLOT_OVERWRITTEN;
+        };
+
+        Self::swap_remove_vec3(&mut self.positions, removed_idx, last_idx);
+        Self::swap_remove_vec3(&mut self.scales, removed_idx, last_idx);
+        Self::swap_remove_vec3(&mut self.colors, removed_idx, last_idx);
+
+        if removed_idx == last_idx {
+            NO_SLOT_OVERWRITTEN
+        } else {
+            removed_idx as isize
         }
     }
 
@@ -216,7 +232,7 @@ mod tests {
         EntityBuffer::write_vec3(&mut buf.scales, 2, [7.0; 3]);
         EntityBuffer::write_vec3(&mut buf.colors, 2, [5.0; 3]);
 
-        buf.remove_entity(a);
+        assert_eq!(buf.remove_entity(a), 0);
 
         assert_eq!(buf.active_count(), 2);
         assert_eq!(buf.get_dense_index(a), None);
@@ -243,12 +259,22 @@ mod tests {
     }
 
     #[test]
+    fn removing_the_last_entity_reports_no_overwritten_slot() {
+        let mut buf = EntityBuffer::new(2);
+        buf.allocate_entity();
+        let b = buf.allocate_entity();
+
+        assert_eq!(buf.remove_entity(b), -1);
+        assert_eq!(buf.active_count(), 1);
+    }
+
+    #[test]
     fn invalid_removals_are_ignored() {
         let mut buf = EntityBuffer::new(1);
         let a = buf.allocate_entity();
-        buf.remove_entity(a);
-        buf.remove_entity(a);
-        buf.remove_entity(42);
+        assert_eq!(buf.remove_entity(a), -1);
+        assert_eq!(buf.remove_entity(a), -1);
+        assert_eq!(buf.remove_entity(42), -1);
 
         assert_eq!(buf.active_count(), 0);
     }

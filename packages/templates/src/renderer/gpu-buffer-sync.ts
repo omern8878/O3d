@@ -1,9 +1,10 @@
+import type { ChannelType } from "../memory/dirty-tracker.ts";
 import type { EntityManager } from "../scene/entity-manager.ts";
 
 /** The slice of `EntityManager` this class reads from. */
 type InstanceSource = Pick<
   EntityManager,
-  "getActiveCount" | "getCapacity" | "getRawViews"
+  "getActiveCount" | "getCapacity" | "getRawViews" | "getDirtyTracker"
 >;
 
 const FLOATS_PER_VEC3 = 3;
@@ -34,22 +35,48 @@ export class GpuInstanceBuffers {
   }
 
   /**
-   * Uploads the active entities straight from Wasm memory views to the GPU
-   * queue, and returns the number of active instances (0 means nothing drawn).
+   * Uploads only the modified slices of each channel, straight from the Wasm
+   * memory views, and returns the number of active instances (0 means nothing
+   * drawn). Channels with no changes cause no `writeBuffer` call at all.
    */
   syncFromEntities(entityManager: InstanceSource): number {
+    const dirtyTracker = entityManager.getDirtyTracker();
     const activeCount = entityManager.getActiveCount();
     if (activeCount === 0) {
+      dirtyTracker.clear();
       return 0;
     }
 
-    this.ensureGpuCapacity(entityManager.getCapacity());
+    const reallocated = this.ensureGpuCapacity(entityManager.getCapacity());
+    if (reallocated) {
+      // Fresh GPU buffers are empty: everything must be uploaded again.
+      dirtyTracker.markAllChannelsDirty(0);
+      dirtyTracker.markAllChannelsDirty(activeCount - 1);
+    }
 
-    const { positions, scales, colors } = entityManager.getRawViews();
-    this.device.queue.writeBuffer(this.positionsBuffer, 0, positions);
-    this.device.queue.writeBuffer(this.scalesBuffer, 0, scales);
-    this.device.queue.writeBuffer(this.colorsBuffer, 0, colors);
+    const views = entityManager.getRawViews();
+    const targets: [ChannelType, GPUBuffer, Float32Array][] = [
+      ["position", this.positionsBuffer, views.positions],
+      ["scale", this.scalesBuffer, views.scales],
+      ["color", this.colorsBuffer, views.colors],
+    ];
 
+    for (const [channel, gpuBuffer, view] of targets) {
+      const range = dirtyTracker.getRange(channel, activeCount);
+      if (range === null) {
+        continue;
+      }
+
+      const floatOffset = range.min * FLOATS_PER_VEC3;
+      const floatLength = (range.max - range.min + 1) * FLOATS_PER_VEC3;
+      this.device.queue.writeBuffer(
+        gpuBuffer,
+        floatOffset * BYTES_PER_FLOAT,
+        view.subarray(floatOffset, floatOffset + floatLength),
+      );
+    }
+
+    dirtyTracker.clear();
     return activeCount;
   }
 
@@ -58,10 +85,13 @@ export class GpuInstanceBuffers {
     this.destroyBuffers();
   }
 
-  /** Reallocates the buffers if `requiredCapacity` exceeds the current size. */
-  private ensureGpuCapacity(requiredCapacity: number): void {
+  /**
+   * Reallocates the buffers if `requiredCapacity` exceeds the current size.
+   * Returns whether new (empty) buffers were created.
+   */
+  private ensureGpuCapacity(requiredCapacity: number): boolean {
     if (requiredCapacity <= this.gpuCapacity) {
-      return;
+      return false;
     }
 
     this.destroyBuffers();
@@ -69,6 +99,7 @@ export class GpuInstanceBuffers {
     this.positionsBuffer = this.createBuffer("instance-positions");
     this.scalesBuffer = this.createBuffer("instance-scales");
     this.colorsBuffer = this.createBuffer("instance-colors");
+    return true;
   }
 
   private createBuffer(label: string): GPUBuffer {

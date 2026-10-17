@@ -1,4 +1,5 @@
 import { EntityBuffer, wasm_memory } from "@engine/core/pkg/engine.js";
+import { DirtyTracker } from "../memory/dirty-tracker.ts";
 import { WasmBufferView } from "../memory/wasm-buffer-view.ts";
 import type {
   EntityId,
@@ -19,6 +20,7 @@ const FLOATS_PER_VEC3 = 3;
 export class EntityManager {
   private readonly buffer: EntityBuffer;
   private readonly view: WasmBufferView;
+  private readonly dirtyTracker = new DirtyTracker();
 
   constructor(initialCapacity: number = 1000) {
     this.buffer = new EntityBuffer(initialCapacity);
@@ -32,8 +34,12 @@ export class EntityManager {
   createEntity(initial?: EntityTransform): EntityId {
     const id = this.buffer.allocate_entity();
     const denseIdx = this.buffer.get_dense_index(id);
-    if (initial && denseIdx !== undefined) {
-      this.applyTransform(denseIdx, initial);
+    if (denseIdx !== undefined) {
+      // Even without an initial transform, Rust wrote default values (e.g. scale 1).
+      this.dirtyTracker.markAllChannelsDirty(denseIdx);
+      if (initial) {
+        this.applyTransform(denseIdx, initial);
+      }
     }
     return id;
   }
@@ -44,12 +50,23 @@ export class EntityManager {
     if (denseIdx === undefined) {
       return;
     }
+    // Mark first: applyTransform can throw (invalid color) after a partial write.
+    this.markTransformDirty(denseIdx, transform);
     this.applyTransform(denseIdx, transform);
   }
 
   /** Removes an entity. Unknown IDs are ignored. */
   removeEntity(id: EntityId): void {
-    this.buffer.remove_entity(id);
+    const overwrittenDenseIdx = this.buffer.remove_entity(id);
+    if (overwrittenDenseIdx >= 0) {
+      // Swap-and-pop moved the last entity's data into this slot.
+      this.dirtyTracker.markAllChannelsDirty(overwrittenDenseIdx);
+    }
+  }
+
+  /** Tracks which dense indices changed since the GPU was last synchronized. */
+  getDirtyTracker(): DirtyTracker {
+    return this.dirtyTracker;
   }
 
   getActiveCount(): number {
@@ -71,6 +88,12 @@ export class EntityManager {
       scales: this.view.getScalesView().subarray(0, end),
       colors: this.view.getColorsView().subarray(0, end),
     };
+  }
+
+  private markTransformDirty(denseIdx: number, transform: EntityTransform): void {
+    if (transform.position) this.dirtyTracker.markDirty("position", denseIdx);
+    if (transform.scale) this.dirtyTracker.markDirty("scale", denseIdx);
+    if (transform.color !== undefined) this.dirtyTracker.markDirty("color", denseIdx);
   }
 
   private applyTransform(denseIdx: number, transform: EntityTransform): void {
