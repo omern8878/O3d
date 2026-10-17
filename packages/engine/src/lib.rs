@@ -1,6 +1,10 @@
-use wasm_bindgen::prelude::*;
+//! Engine core entrypoint. Declares modules and re-exports the public Wasm
+//! bindings; contains no logic of its own.
 
-#[wasm_bindgen]
-pub fn init_engine() -> String {
-    "Engine Core Initialized!".to_string()
-}
+pub mod ecs;
+pub mod init;
+pub mod memory;
+
+pub use ecs::entity_buffer::EntityBuffer;
+pub use init::init_engine;
+pub use memory::wasm_memory;
