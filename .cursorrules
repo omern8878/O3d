@@ -1,0 +1,47 @@
+# Project Rules: Clean Code and SOLID (strictly enforced)
+
+These rules apply to every file in this monorepo (Rust and TypeScript) and must be
+followed for all new code and all refactors.
+
+## 1. One responsibility per file
+- NEVER dump multiple responsibilities, structs, or classes into a single file.
+  This applies above all to `lib.rs`, `index.ts` and `main.ts`.
+- One primary struct / class / module per file. Small private helpers that exist
+  only to serve that primary type may live next to it; anything else gets its own file.
+- Unit tests live in the same file as the type they test (`#[cfg(test)] mod tests`).
+
+## 2. SOLID, especially the Single Responsibility Principle (SRP)
+- SRP: every struct, class, function and module has exactly one reason to change.
+- Open/Closed: extend behaviour by adding new types or modules, not by growing
+  existing ones with flags and special cases.
+- Liskov / Interface Segregation: keep traits and interfaces small and focused;
+  never force a consumer to depend on methods it does not use.
+- Dependency Inversion: depend on abstractions at module boundaries, and compose
+  small types rather than inheriting or duplicating behaviour.
+
+## 3. Entrypoints are barrels only
+- `lib.rs` and `index.ts` must stay clean barrel / export entrypoints:
+  `mod` / `pub mod` declarations and `pub use` / `export ... from` re-exports only.
+- Zero business logic, zero data structures, zero FFI function bodies in entrypoints.
+- `main.ts` only wires modules together; logic belongs in dedicated modules.
+
+## 4. Directory layout by domain
+Group related domain logic into dedicated subdirectories, each with a `mod.rs`
+(Rust) or `index.ts` (TypeScript) barrel:
+- `ecs/`       entity / component storage and indexing
+- `math/`      pure mathematical logic (vectors, matrices, transforms)
+- `renderer/`  rendering and GPU-facing code
+- `memory/`    linear-memory and buffer interop helpers
+
+## 5. Separate data, math and bindings
+- Data structures, mathematical logic, and FFI / Wasm bindings must live in
+  separate files.
+- Keep domain logic pure (no `#[wasm_bindgen]`, no JS types) wherever possible,
+  and wrap it in a thin binding layer that only translates types.
+- Never duplicate logic (DRY): extract a small private helper instead.
+
+## 6. Self-documenting code
+- Use intention-revealing names; prefer small functions with a single purpose.
+- Replace magic numbers with named constants.
+- Comment the *why* (invariants, contracts, trade-offs), not the *what*.
+- Document every public item and every module (`//!` / `///` / TSDoc).
