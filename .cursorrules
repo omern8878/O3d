@@ -8,7 +8,9 @@ followed for all new code and all refactors.
   This applies above all to `lib.rs`, `index.ts` and `main.ts`.
 - One primary struct / class / module per file. Small private helpers that exist
   only to serve that primary type may live next to it; anything else gets its own file.
-- Unit tests live in the same file as the type they test (`#[cfg(test)] mod tests`).
+- Rust unit tests live in the same file as the type they test (`#[cfg(test)] mod tests`).
+- TypeScript unit tests live next to the file they test as `<name>.test.ts`; shared
+  test doubles go in `testing/` and are never exported from the `index.ts` barrel.
 
 ## 2. SOLID, especially the Single Responsibility Principle (SRP)
 - SRP: every struct, class, function and module has exactly one reason to change.
