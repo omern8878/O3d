@@ -76,10 +76,11 @@ describe("InstancedRenderer", () => {
       [1, 1, 1, 2, 2, 2, 3, 3, 3],
       [1, 0, 0, 0, 1, 0, 0, 0, 1],
     ];
-    // Write 0 is the one-time quad upload; the next three are the instance data.
-    assert.equal(device.writes.length, 4);
+    // Write 0 is the quad, write 1 the identity camera; the rest are instance data.
+    assert.equal(device.writes.length, 5);
     assert.equal(device.writes[0]!.data.length, 12);
-    const uploads = device.writes.slice(1);
+    assert.equal(device.writes[1]!.data.length, 16);
+    const uploads = device.writes.slice(2);
     uploads.forEach((write, i) => {
       assert.equal(write.data.buffer, memory);
       assert.equal(write.data.length, 9);
@@ -99,7 +100,7 @@ describe("InstancedRenderer", () => {
     ]);
     assert.deepEqual(
       calls.map((c) => c.method),
-      ["setPipeline", "setVertexBuffer", "setVertexBuffer", "setVertexBuffer", "setVertexBuffer", "draw", "end"],
+      ["setPipeline", "setBindGroup", "setVertexBuffer", "setVertexBuffer", "setVertexBuffer", "setVertexBuffer", "draw", "end"],
     );
     assert.equal(device.submitCount, 1);
   });

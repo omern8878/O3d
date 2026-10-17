@@ -1,11 +1,19 @@
+import { wasm_memory, type Camera } from "@engine/core/pkg/engine.js";
 import { QuadGeometry } from "../geometry/quad-geometry.ts";
 import type { EntityManager } from "../scene/entity-manager.ts";
+import { CameraUniformBuffer } from "./camera-uniform-buffer.ts";
 import { GpuInstanceBuffers } from "./gpu-buffer-sync.ts";
 import type { GpuContext } from "./gpu-context.ts";
 import { INSTANCED_QUAD_WGSL } from "./shaders/instanced-quad.wgsl.ts";
 
 const VEC2_STRIDE = 2 * 4;
 const VEC3_STRIDE = 3 * 4;
+const IDENTITY_MATRIX = new Float32Array([
+  1, 0, 0, 0,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  0, 0, 0, 1,
+]);
 
 /** One tightly packed vertex buffer holding a single attribute. */
 function attributeLayout(
@@ -24,13 +32,15 @@ function attributeLayout(
 /**
  * Draws every entity as an instanced, colored quad in a single draw call.
  *
- * Vertex buffer slots: 0 = quad corners (per vertex), 1 = positions,
+ * Bind group 0 holds the camera `view_proj` uniform (identity until
+ * {@link InstancedRenderer.updateCamera} is called). Vertex buffer slots: 0 = quad corners (per vertex), 1 = positions,
  * 2 = scales, 3 = colors (per instance).
  */
 export class InstancedRenderer {
   private readonly gpuContext: GpuContext;
   private readonly quadGeometry: QuadGeometry;
   private readonly instanceBuffers: GpuInstanceBuffers;
+  private readonly cameraUniform: CameraUniformBuffer;
   private readonly pipeline: GPURenderPipeline;
 
   constructor(gpuContext: GpuContext, initialCapacity: number = 1000) {
@@ -40,13 +50,29 @@ export class InstancedRenderer {
     this.quadGeometry = new QuadGeometry(device);
     this.instanceBuffers = new GpuInstanceBuffers(device, initialCapacity);
 
+    const cameraLayout = device.createBindGroupLayout({
+      label: "camera-bind-group-layout",
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX,
+          buffer: { type: "uniform" },
+        },
+      ],
+    });
+    this.cameraUniform = new CameraUniformBuffer(device, cameraLayout);
+    this.cameraUniform.writeRawMatrix(IDENTITY_MATRIX);
+
     const module = device.createShaderModule({
       label: "instanced-quad-shader",
       code: INSTANCED_QUAD_WGSL,
     });
     this.pipeline = device.createRenderPipeline({
       label: "instanced-quad-pipeline",
-      layout: "auto",
+      layout: device.createPipelineLayout({
+        label: "instanced-quad-pipeline-layout",
+        bindGroupLayouts: [cameraLayout],
+      }),
       vertex: {
         module,
         entryPoint: "vs_main",
@@ -64,6 +90,17 @@ export class InstancedRenderer {
       },
       primitive: { topology: "triangle-list", cullMode: "none" },
     });
+  }
+
+  /**
+   * Uploads the camera's `view_proj` to the GPU. Call it whenever the camera
+   * changes; `wasmMemoryFn` defaults to the engine's own Wasm memory.
+   */
+  updateCamera(
+    wasmCamera: Camera,
+    wasmMemoryFn: () => WebAssembly.Memory = () => wasm_memory() as WebAssembly.Memory,
+  ): void {
+    this.cameraUniform.syncFromWasmCamera(wasmCamera, wasmMemoryFn);
   }
 
   /**
@@ -88,6 +125,7 @@ export class InstancedRenderer {
 
     if (instanceCount > 0) {
       pass.setPipeline(this.pipeline);
+      pass.setBindGroup(0, this.cameraUniform.bindGroup);
       pass.setVertexBuffer(0, this.quadGeometry.vertexBuffer);
       pass.setVertexBuffer(1, this.instanceBuffers.positionsBuffer);
       pass.setVertexBuffer(2, this.instanceBuffers.scalesBuffer);
@@ -105,5 +143,6 @@ export class InstancedRenderer {
   destroy(): void {
     this.quadGeometry.destroy();
     this.instanceBuffers.destroy();
+    this.cameraUniform.destroy();
   }
 }
