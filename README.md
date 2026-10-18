@@ -22,6 +22,24 @@ Rust ECS in Wasm memory ──zero-copy views──▶ dirty-range tracking ─�
 
 ---
 
+## Why Use It
+
+- **Draw large numbers of objects without a CPU bottleneck.** Entity data stays in Wasm memory and reaches the GPU as packed buffers, with no per-object JavaScript work in the render loop.
+- **Pay only for what changes.** A static scene costs almost nothing per frame; moving one object uploads a few bytes.
+- **Stay smooth on mobile.** Fewer uploads, one draw call and culling of off-screen objects save bandwidth, fill-rate and battery.
+- **Simple, safe API.** You work with stable entity IDs, plain objects and read-only views. Bad input is ignored instead of crashing the engine.
+- **2D and 3D from one renderer.** Orthographic and perspective cameras, pan, zoom and orbit controls are built in.
+
+## How It Works
+
+1. You create and update entities through `EntityManager`; data is written directly into Wasm memory.
+2. The engine records which ranges changed.
+3. Optionally, it culls entities outside the camera's view.
+4. Only the changed (or visible) data is uploaded to the GPU.
+5. `InstancedRenderer` draws everything in one instanced draw call.
+
+---
+
 ## 🧠 AI & Architecture Blueprint (LLM-Optimized Context)
 
 Read this before changing or extending the engine. These are the contracts the design depends on.
@@ -41,21 +59,6 @@ Corollaries:
 - **IDs are stable, indices are not.** An `EntityId` is valid for the entity's whole life; its dense storage index changes when other entities are removed. Never keep dense indices across frames.
 - **Culled frames break the dense mirror.** After drawing a compacted subset, the GPU no longer mirrors the full entity arrays, so the renderer re-marks everything dirty before returning to the full path.
 - **The Wasm boundary is hostile input.** Every exported method must tolerate `NaN`, infinities, zero, stale IDs and degenerate geometry without panicking.
-
-### Design Principles
-
-- **Single responsibility:** storage, math, change tracking, GPU upload and facades are separate concerns with one reason to change each.
-- **Pure core, thin bindings:** the math and ECS logic is plain Rust; the Wasm layer only translates types.
-- **Open/closed:** new capabilities arrive as new types, not as flags on existing ones.
-- **Tested at every boundary:** Rust unit tests, TypeScript unit tests, and full-stack tests on the real Wasm module against a mock WebGPU device.
-
-### Per-Frame Data Flow
-
-1. **Mutate:** `updateEntity` writes straight into Wasm memory and widens a dirty interval per channel.
-2. **Camera:** the 64-byte view-projection uniform is uploaded only if the camera changed.
-3. **Cull (optional):** Wasm tests every entity against the frustum and compacts the visible ones.
-4. **Upload:** only dirty sub-slices (or the compacted visible set) are written to GPU buffers, then dirty state is cleared.
-5. **Draw:** one render pass, one instanced draw with the instance count.
 
 ---
 
@@ -217,21 +220,6 @@ requestAnimationFrame(frame);
 ```
 
 Use either `render` or `renderCulled` in a frame, not both. Both return the number of instances drawn.
-
-### Verify
-
-```bash
-cargo fmt --check && cargo test && cargo clippy --all-targets -- -D warnings   # Rust (run in the engine crate)
-npm test -w @engine/templates                                                  # TypeScript unit + full-stack tests
-```
-
----
-
-## Roadmap
-
-- [x] **Stages 1 to 4:** Wasm ECS, zero-copy TypeScript layer, WebGPU instanced renderer, dirty range tracking, 2D/3D camera, Gribb-Hartmann frustum culling with stream compaction, memory-safety hardening.
-- [ ] **Stage 5: Raycasting & Spatial Picking:** screen-to-world rays from the inverse view-projection, ray-vs-entity tests in Wasm, a spatial acceleration structure, and a picking API that returns stable `EntityId`s.
-- [ ] **Stage 6: SDF Shaders & Benchmarks:** signed-distance-field shapes and outlines in WGSL, plus a reproducible benchmark suite (entity count, upload bytes per frame, culling cost, frame time).
 
 ---
 
