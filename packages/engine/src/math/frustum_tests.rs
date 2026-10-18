@@ -15,13 +15,13 @@ fn assert_close(actual: &[f32], expected: &[f32]) {
 /// Default camera: eye (0, 0, 10) looking at the origin, near 0.1, far 1000.
 /// In `Ortho2D` mode it sees x, y in [-100, 100] when `aspect == 1`.
 fn ortho_frustum() -> Frustum {
-    Frustum::from_view_proj(Camera::new(1.0).view_proj())
+    Frustum::from_view_proj(Camera::new(1.0).view_proj_mat())
 }
 
 fn perspective_frustum() -> Frustum {
     let mut camera = Camera::new(1.0);
     camera.set_mode(ProjectionMode::Perspective3D);
-    Frustum::from_view_proj(camera.view_proj())
+    Frustum::from_view_proj(camera.view_proj_mat())
 }
 
 #[test]
@@ -109,7 +109,7 @@ fn ortho_culls_on_every_side() {
 fn ortho_follows_the_camera_when_panned() {
     let mut camera = Camera::new(1.0);
     camera.pan_2d(250.0, 0.0);
-    let frustum = Frustum::from_view_proj(camera.view_proj());
+    let frustum = Frustum::from_view_proj(camera.view_proj_mat());
 
     assert!(frustum.contains_entity([250.0, 0.0, 0.0], [10.0, 10.0, 1.0]));
     assert!(!frustum.contains_entity([0.0, 0.0, 0.0], [10.0, 10.0, 1.0]));

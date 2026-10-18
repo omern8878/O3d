@@ -68,6 +68,14 @@ export class EntityManager {
     return this.dirtyTracker;
   }
 
+  /**
+   * The underlying Wasm buffer, for Wasm-side systems such as culling.
+   * Not for general use: mutating it directly bypasses dirty tracking.
+   */
+  getRawWasmBuffer(): EntityBuffer {
+    return this.buffer;
+  }
+
   getActiveCount(): number {
     return this.buffer.active_count();
   }

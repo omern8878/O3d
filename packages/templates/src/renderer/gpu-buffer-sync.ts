@@ -5,6 +5,7 @@ import {
   FLOATS_PER_VEC3,
 } from "../memory/vec3-layout.ts";
 import type { EntityManager } from "../scene/entity-manager.ts";
+import type { VisibleViews } from "../types/culling.types.ts";
 
 /** The slice of `EntityManager` this class reads from. */
 type InstanceSource = Pick<
@@ -51,8 +52,7 @@ export class GpuInstanceBuffers {
     const reallocated = this.ensureGpuCapacity(entityManager.getCapacity());
     if (reallocated) {
       // Fresh GPU buffers are empty: everything must be uploaded again.
-      dirtyTracker.markAllChannelsDirty(0);
-      dirtyTracker.markAllChannelsDirty(activeCount - 1);
+      dirtyTracker.markAllDirty(activeCount);
     }
 
     const views = entityManager.getRawViews();
@@ -79,6 +79,31 @@ export class GpuInstanceBuffers {
 
     dirtyTracker.clear();
     return activeCount;
+  }
+
+  /**
+   * Uploads a frustum-culled, compacted instance set in full, replacing
+   * whatever the buffers held. Returns the visible count (0 uploads nothing).
+   *
+   * The GPU buffers no longer mirror the dense entity arrays afterwards, so
+   * the caller must mark entities dirty before switching back to
+   * {@link GpuInstanceBuffers.syncFromEntities}.
+   */
+  syncFromVisibleViews(views: VisibleViews): number {
+    const { visibleCount } = views;
+    if (visibleCount === 0) {
+      return 0;
+    }
+
+    this.ensureGpuCapacity(visibleCount);
+
+    const floatLength = visibleCount * FLOATS_PER_VEC3;
+    const { queue } = this.device;
+    queue.writeBuffer(this.positionsBuffer, 0, views.positions.subarray(0, floatLength));
+    queue.writeBuffer(this.scalesBuffer, 0, views.scales.subarray(0, floatLength));
+    queue.writeBuffer(this.colorsBuffer, 0, views.colors.subarray(0, floatLength));
+
+    return visibleCount;
   }
 
   /** Frees all three GPU buffers. */

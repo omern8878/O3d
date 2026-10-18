@@ -41,6 +41,15 @@ export class DirtyTracker {
     }
   }
 
+  /** Marks entities `0 .. activeCount - 1` dirty on every channel. */
+  markAllDirty(activeCount: number): void {
+    if (activeCount <= 0) {
+      return;
+    }
+    this.markAllChannelsDirty(0);
+    this.markAllChannelsDirty(activeCount - 1);
+  }
+
   /**
    * The channel's dirty interval, with `max` clamped to the last active index
    * (entities removed since being marked no longer need uploading).

@@ -6,6 +6,7 @@ pub mod init;
 pub mod math;
 pub mod memory;
 
+pub use ecs::culling_buffer::CullingBuffer;
 pub use ecs::entity_buffer::EntityBuffer;
 pub use init::init_engine;
 pub use math::camera::{Camera, ProjectionMode};

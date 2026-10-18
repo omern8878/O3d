@@ -160,7 +160,7 @@ impl Camera {
 
 impl Camera {
     /// The combined view-projection matrix (not exported to JS).
-    pub fn view_proj(&self) -> &Mat4 {
+    pub(crate) fn view_proj_mat(&self) -> &Mat4 {
         &self.view_proj
     }
 
