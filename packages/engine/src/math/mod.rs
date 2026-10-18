@@ -1,6 +1,7 @@
-//! Pure mathematics: vectors, matrices and the cameras built on them.
+//! Pure mathematics: vectors, matrices, cameras and visibility culling.
 
 pub mod camera;
+pub mod frustum;
 pub mod mat4;
 pub mod spherical;
 pub mod vec3;
