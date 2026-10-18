@@ -11,6 +11,13 @@
 
 use super::vec3::{cross, dot, normalize, sub};
 
+/// View direction used when `eye == target`.
+const DEFAULT_FORWARD: [f32; 3] = [0.0, 0.0, -1.0];
+
+/// Up axes tried, in order, when the requested `up` is unusable.
+const FALLBACK_UP_Z: [f32; 3] = [0.0, 0.0, -1.0];
+const FALLBACK_UP_X: [f32; 3] = [1.0, 0.0, 0.0];
+
 /// A 4x4 `f32` matrix in column-major order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mat4(pub [f32; 16]);
@@ -75,12 +82,16 @@ impl Mat4 {
 
     /// View matrix placing the camera at `eye`, looking at `target`.
     ///
-    /// Degenerate input (`eye == target`, or `up` parallel to the view
-    /// direction) yields zero basis vectors rather than NaNs.
+    /// Degenerate input still yields an orthonormal basis: `eye == target`
+    /// looks down `-Z`, and an `up` that is zero or parallel to the view
+    /// direction is replaced by a perpendicular axis.
     #[rustfmt::skip] // keeps the 4x4 literal laid out as columns
     pub fn look_at_rh(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> Self {
-        let forward = normalize(sub(target, eye));
-        let right = normalize(cross(forward, up));
+        let mut forward = normalize(sub(target, eye));
+        if forward == [0.0; 3] {
+            forward = DEFAULT_FORWARD;
+        }
+        let right = Self::right_vector(forward, up);
         let true_up = cross(right, forward);
 
         Mat4([
@@ -89,6 +100,17 @@ impl Mat4 {
             right[2], true_up[2], -forward[2], 0.0,
             -dot(right, eye), -dot(true_up, eye), dot(forward, eye), 1.0,
         ])
+    }
+
+    /// Unit vector perpendicular to `forward` and `up`, trying fallback up axes
+    /// when `up` is unusable. `forward` is unit length, so it cannot be
+    /// parallel to every fallback.
+    fn right_vector(forward: [f32; 3], up: [f32; 3]) -> [f32; 3] {
+        [up, FALLBACK_UP_Z, FALLBACK_UP_X]
+            .into_iter()
+            .map(|candidate| normalize(cross(forward, candidate)))
+            .find(|right| *right != [0.0; 3])
+            .unwrap_or([1.0, 0.0, 0.0])
     }
 
     /// Multiplies the matrix by `(x, y, z, 1)` and returns the homogeneous

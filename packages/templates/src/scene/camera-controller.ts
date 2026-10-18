@@ -96,7 +96,10 @@ export class CameraController {
     return true;
   }
 
-  /** The underlying Wasm camera, for advanced or zero-copy access. */
+  /**
+   * The underlying Wasm camera, for Wasm-side systems such as culling.
+   * @internal Mutating it directly bypasses the controller's dirty flag.
+   */
   getRawWasmCamera(): Camera {
     return this.wasmCamera;
   }

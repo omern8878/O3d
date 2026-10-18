@@ -11,9 +11,13 @@ export type {
   ColorInput,
   EntityId,
   EntityTransform,
-  RawEntityViews,
   Vec3,
 } from "./types/entity.types.ts";
 export type { CameraConfig, CameraMode } from "./types/camera.types.ts";
+export type {
+  ReadonlyFloat32Array,
+  ReadonlyRawEntityViews,
+  ReadonlyUint32Array,
+} from "./types/readonly-buffer.types.ts";
 export type { VisibleViews } from "./types/culling.types.ts";
 export type { ClearColor, RendererConfig } from "./types/renderer.types.ts";

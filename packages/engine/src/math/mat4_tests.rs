@@ -172,3 +172,40 @@ fn look_at_degenerate_input_stays_finite() {
 
     assert!(view.0.iter().all(|v| v.is_finite()));
 }
+
+fn assert_orthonormal_view(view: &Mat4) {
+    let column = |c: usize| [view.0[c], view.0[4 + c], view.0[8 + c]];
+    let (right, up, back) = (column(0), column(1), column(2));
+
+    for axis in [right, up, back] {
+        assert_close(&[dot(axis, axis)], &[1.0]);
+    }
+    assert_close(
+        &[dot(right, up), dot(up, back), dot(right, back)],
+        &[0.0; 3],
+    );
+}
+
+#[test]
+fn look_at_with_eye_on_target_looks_down_negative_z_with_a_valid_basis() {
+    let view = Mat4::look_at_rh([1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [0.0, 1.0, 0.0]);
+
+    assert_orthonormal_view(&view);
+    assert_close(&view.transform_point3([1.0, 2.0, 3.0])[..3], &[0.0; 3]);
+}
+
+#[test]
+fn look_at_with_up_parallel_to_the_view_direction_keeps_a_valid_basis() {
+    for eye_y in [10.0, -10.0] {
+        let view = Mat4::look_at_rh([0.0, eye_y, 0.0], [0.0; 3], [0.0, 1.0, 0.0]);
+
+        assert_orthonormal_view(&view);
+    }
+}
+
+#[test]
+fn look_at_with_a_zero_up_vector_keeps_a_valid_basis() {
+    let view = Mat4::look_at_rh([0.0, 0.0, 10.0], [0.0; 3], [0.0; 3]);
+
+    assert_orthonormal_view(&view);
+}

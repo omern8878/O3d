@@ -6,6 +6,7 @@ import {
 } from "../memory/vec3-layout.ts";
 import type { EntityManager } from "../scene/entity-manager.ts";
 import type { VisibleViews } from "../types/culling.types.ts";
+import type { ReadonlyFloat32Array } from "../types/readonly-buffer.types.ts";
 
 /** The slice of `EntityManager` this class reads from. */
 type InstanceSource = Pick<
@@ -56,7 +57,7 @@ export class GpuInstanceBuffers {
     }
 
     const views = entityManager.getRawViews();
-    const targets: [ChannelType, GPUBuffer, Float32Array][] = [
+    const targets: [ChannelType, GPUBuffer, ReadonlyFloat32Array][] = [
       ["position", this.positionsBuffer, views.positions],
       ["scale", this.scalesBuffer, views.scales],
       ["color", this.colorsBuffer, views.colors],
@@ -70,7 +71,7 @@ export class GpuInstanceBuffers {
 
       const floatOffset = range.min * FLOATS_PER_VEC3;
       const floatLength = (range.max - range.min + 1) * FLOATS_PER_VEC3;
-      this.device.queue.writeBuffer(
+      this.writeToGpu(
         gpuBuffer,
         floatOffset * BYTES_PER_FLOAT,
         view.subarray(floatOffset, floatOffset + floatLength),
@@ -98,10 +99,9 @@ export class GpuInstanceBuffers {
     this.ensureGpuCapacity(visibleCount);
 
     const floatLength = visibleCount * FLOATS_PER_VEC3;
-    const { queue } = this.device;
-    queue.writeBuffer(this.positionsBuffer, 0, views.positions.subarray(0, floatLength));
-    queue.writeBuffer(this.scalesBuffer, 0, views.scales.subarray(0, floatLength));
-    queue.writeBuffer(this.colorsBuffer, 0, views.colors.subarray(0, floatLength));
+    this.writeToGpu(this.positionsBuffer, 0, views.positions.subarray(0, floatLength));
+    this.writeToGpu(this.scalesBuffer, 0, views.scales.subarray(0, floatLength));
+    this.writeToGpu(this.colorsBuffer, 0, views.colors.subarray(0, floatLength));
 
     return visibleCount;
   }
@@ -126,6 +126,18 @@ export class GpuInstanceBuffers {
     this.scalesBuffer = this.createBuffer("instance-scales");
     this.colorsBuffer = this.createBuffer("instance-colors");
     return true;
+  }
+
+  /**
+   * The only place read-only views are cast back to `Float32Array`: WebGPU
+   * just reads the source during `writeBuffer`, so no mutation can happen.
+   */
+  private writeToGpu(
+    gpuBuffer: GPUBuffer,
+    byteOffset: number,
+    data: ReadonlyFloat32Array,
+  ): void {
+    this.device.queue.writeBuffer(gpuBuffer, byteOffset, data as Float32Array);
   }
 
   private createBuffer(label: string): GPUBuffer {

@@ -209,3 +209,188 @@ fn view_proj_ptr_exposes_the_sixteen_floats_of_the_matrix() {
 
     assert_eq!(exposed, &camera.view_proj_mat().0);
 }
+
+fn assert_finite_matrix(camera: &Camera) {
+    assert!(
+        camera.view_proj_mat().0.iter().all(|v| v.is_finite()),
+        "non-finite view_proj: {:?}",
+        camera.view_proj_mat().0
+    );
+}
+
+const BAD_FLOATS: [f32; 4] = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX];
+
+#[test]
+fn constructor_falls_back_to_a_unit_aspect_for_unusable_values() {
+    for aspect in [f32::NAN, f32::INFINITY, 0.0, -2.0, 1.0e-30, f32::MAX] {
+        let camera = Camera::new(aspect);
+
+        assert_eq!(camera.aspect(), 1.0, "aspect {aspect}");
+        assert_finite_matrix(&camera);
+    }
+}
+
+#[test]
+fn set_aspect_ignores_unusable_values_and_keeps_the_previous_one() {
+    let mut camera = Camera::new(2.0);
+    let before = *camera.view_proj_mat();
+
+    for aspect in [f32::NAN, f32::INFINITY, 0.0, -1.0, 1.0e-30, f32::MAX] {
+        camera.set_aspect(aspect);
+
+        assert_eq!(camera.aspect(), 2.0, "aspect {aspect}");
+    }
+    assert_eq!(*camera.view_proj_mat(), before);
+}
+
+#[test]
+fn set_aspect_accepts_the_extreme_but_valid_range() {
+    let mut camera = Camera::new(1.0);
+    for aspect in [MIN_ASPECT, MAX_ASPECT] {
+        camera.set_aspect(aspect);
+
+        assert_eq!(camera.aspect(), aspect);
+        assert_finite_matrix(&camera);
+        camera.set_mode(ProjectionMode::Perspective3D);
+        assert_finite_matrix(&camera);
+        camera.set_mode(ProjectionMode::Ortho2D);
+    }
+}
+
+#[test]
+fn set_position_and_target_ignore_invalid_coordinates() {
+    let mut camera = Camera::new(1.0);
+    let (eye, target) = (camera.eye, camera.target);
+
+    for bad in BAD_FLOATS {
+        camera.set_position(bad, 0.0, 0.0);
+        camera.set_position(0.0, bad, 0.0);
+        camera.set_position(0.0, 0.0, bad);
+        camera.set_target(bad, 0.0, 0.0);
+        camera.set_target(0.0, bad, 0.0);
+        camera.set_target(0.0, 0.0, bad);
+    }
+
+    assert_eq!(camera.eye, eye);
+    assert_eq!(camera.target, target);
+    assert_finite_matrix(&camera);
+}
+
+#[test]
+fn set_ortho_zoom_ignores_non_finite_and_clamps_huge_values() {
+    let mut camera = Camera::new(1.0);
+    camera.set_ortho_zoom(50.0);
+
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        camera.set_ortho_zoom(bad);
+        assert_eq!(camera.ortho_half_height(), 50.0);
+    }
+
+    camera.set_ortho_zoom(f32::MAX);
+    assert_eq!(camera.ortho_half_height(), MAX_ORTHO_HALF_HEIGHT);
+    assert_finite_matrix(&camera);
+
+    camera.set_ortho_zoom(0.0);
+    assert_eq!(camera.ortho_half_height(), MIN_ORTHO_HALF_HEIGHT);
+    assert_finite_matrix(&camera);
+}
+
+#[test]
+fn zoom_by_factor_ignores_non_finite_factors_in_both_modes() {
+    for mode in [ProjectionMode::Ortho2D, ProjectionMode::Perspective3D] {
+        let mut camera = Camera::new(1.0);
+        camera.set_mode(mode);
+        let (eye, half_height) = (camera.eye, camera.ortho_half_height());
+
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            camera.zoom_by_factor(bad);
+        }
+
+        assert_eq!(camera.eye, eye);
+        assert_eq!(camera.ortho_half_height(), half_height);
+        assert_finite_matrix(&camera);
+    }
+}
+
+#[test]
+fn zoom_by_zero_or_a_huge_factor_keeps_the_matrix_finite() {
+    for mode in [ProjectionMode::Ortho2D, ProjectionMode::Perspective3D] {
+        let mut camera = Camera::new(1.0);
+        camera.set_mode(mode);
+
+        for factor in [0.0, -0.0, f32::MIN_POSITIVE, f32::MAX] {
+            camera.zoom_by_factor(factor);
+            assert_finite_matrix(&camera);
+        }
+    }
+}
+
+#[test]
+fn orbit_3d_ignores_non_finite_deltas() {
+    let mut camera = Camera::new(1.0);
+    camera.set_mode(ProjectionMode::Perspective3D);
+    let eye = camera.eye;
+
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        camera.orbit_3d(bad, 0.0);
+        camera.orbit_3d(0.0, bad);
+    }
+
+    assert_eq!(camera.eye, eye);
+    assert_finite_matrix(&camera);
+}
+
+#[test]
+fn orbit_3d_with_huge_finite_deltas_stays_finite() {
+    let mut camera = Camera::new(1.0);
+    camera.set_mode(ProjectionMode::Perspective3D);
+    camera.orbit_3d(f32::MAX, f32::MAX);
+
+    assert!(camera.eye.iter().all(|v| v.is_finite()));
+    assert_finite_matrix(&camera);
+}
+
+#[test]
+fn pan_2d_ignores_non_finite_or_out_of_range_deltas() {
+    let mut camera = Camera::new(1.0);
+    let (eye, target) = (camera.eye, camera.target);
+
+    for bad in BAD_FLOATS {
+        camera.pan_2d(bad, 0.0);
+        camera.pan_2d(0.0, bad);
+    }
+
+    assert_eq!(camera.eye, eye);
+    assert_eq!(camera.target, target);
+    assert_finite_matrix(&camera);
+}
+
+#[test]
+fn eye_equal_to_target_keeps_a_finite_usable_matrix_in_both_modes() {
+    for mode in [ProjectionMode::Ortho2D, ProjectionMode::Perspective3D] {
+        let mut camera = Camera::new(1.0);
+        camera.set_mode(mode);
+        camera.set_position(3.0, 4.0, 5.0);
+        camera.set_target(3.0, 4.0, 5.0);
+
+        assert_finite_matrix(&camera);
+        camera.orbit_3d(1.0, 1.0);
+        camera.zoom_by_factor(2.0);
+        assert_finite_matrix(&camera);
+        assert_eq!(camera.eye, [3.0, 4.0, 5.0]);
+    }
+}
+
+#[test]
+fn looking_straight_up_or_down_keeps_a_finite_matrix() {
+    let mut camera = Camera::new(1.0);
+    camera.set_mode(ProjectionMode::Perspective3D);
+
+    for eye_y in [10.0, -10.0] {
+        camera.set_target(0.0, 0.0, 0.0);
+        camera.set_position(0.0, eye_y, 0.0);
+
+        assert_finite_matrix(&camera);
+        assert_close(&to_clip(&camera, [0.0, 0.0, 0.0])[..2], &[0.0, 0.0]);
+    }
+}
