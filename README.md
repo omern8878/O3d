@@ -17,6 +17,7 @@ Rust ECS in Wasm memory ──zero-copy views──▶ dirty-range tracking ─�
 | Idle = 0 bytes | Unchanged scenes upload nothing; edits upload only the touched slice. |
 | One draw call | All entities render as instanced quads in a single `draw`. |
 | Culled on the CPU | Gribb-Hartmann frustum culling with stream compaction sends only visible instances. |
+| Procedural SDF shapes | Anti-aliased discs drawn analytically in the shader: smooth edges at any zoom, no extra geometry. |
 | Pixel-accurate picking | Click or tap any point to get the entity under it, nearest-first, in 2D and 3D. |
 | Read-only by type | Consumers receive immutable views; the engine owns all writes. |
 | Panic-free boundary | Invalid input from JavaScript cannot crash the Wasm module. |
@@ -29,6 +30,8 @@ Rust ECS in Wasm memory ──zero-copy views──▶ dirty-range tracking ─�
 - **Pay only for what changes.** A static scene costs almost nothing per frame; moving one object uploads a few bytes.
 - **Stay smooth on mobile.** Fewer uploads, one draw call and culling of off-screen objects save bandwidth, fill-rate and battery.
 - **Simple, safe API.** You work with stable entity IDs, plain objects and read-only views. Bad input is ignored instead of crashing the engine.
+- **Crisp shapes for free.** Circles are signed-distance fields evaluated per pixel, so dots and graph nodes stay smooth at any zoom without meshes or textures.
+- **One-object setup.** `SceneTemplate` wires storage, camera, culling, picking and rendering together.
 - **Built-in picking.** Turn a mouse or touch position into a stable `EntityId` with one call; no GPU readback or picking pass.
 - **2D and 3D from one renderer.** Orthographic and perspective cameras, pan, zoom and orbit controls are built in.
 
@@ -103,6 +106,9 @@ A screen point is unprojected through the **inverse view-projection matrix** (ad
 - **No GPU round-trip:** the query runs on the data already in Wasm memory.
 - **Safe on bad input:** non-finite coordinates, an empty scene or a non-invertible camera simply return `null`.
 - **Approximation:** spheres inscribe the entity's box, so a pick never lands outside an entity, but the corners of a square are not pickable.
+
+### Procedural SDF Shapes
+Every instance is a quad, and the fragment shader decides what to draw. In **circle** mode it computes the distance from the quad's center in local `[-1, 1]` space, discards fragments outside the unit circle, and derives edge coverage from the screen-space derivative of that distance (`1 - smoothstep(1 - fwidth, 1, dist)`). The result is analytically anti-aliased at any zoom level and output as premultiplied alpha, so overlapping discs blend correctly. **Quad** mode is the crisp, opaque default. The shape is baked into the pipeline when it is created, so the unused mode costs nothing per pixel.
 
 ---
 
@@ -192,6 +198,47 @@ const orbit = new CameraController({
 });
 orbit.orbit(0.02, -0.01); // azimuth, elevation (radians)
 ```
+
+### Everything in one object with `SceneTemplate`
+
+```ts
+import init from "@engine/core/pkg/engine.js";
+import { SceneTemplate } from "@engine/templates";
+
+await init();
+
+const canvas = document.querySelector<HTMLCanvasElement>("#render-canvas")!;
+const scene = await SceneTemplate.create({
+  canvas,
+  cameraMode: "ortho2d",   // or "perspective3d"
+  shapeMode: "circle",     // anti-aliased SDF discs (default); "quad" for crisp rectangles
+  enableCulling: true,     // draw only what is on screen (default)
+  initialCapacity: 10_000,
+});
+
+// Nodes are plain tuples: position, scale (size), color (r, g, b in 0..1).
+const a = scene.addNode([-20, 0, 0], [12, 12, 1], [0.2, 0.7, 1.0]);
+const b = scene.addNode([20, 10, 0], [8, 8, 1], [1.0, 0.5, 0.2]);
+
+scene.updateNodePosition(b, [25, 15, 0]);
+scene.updateNodeColor(a, [1, 1, 1]);
+scene.removeNode(b); // true if the node existed
+
+canvas.addEventListener("pointerdown", (event) => {
+  const hit = scene.pickNodeAtScreen(event.clientX, event.clientY, canvas.getBoundingClientRect());
+  if (hit !== null) scene.updateNodeColor(hit, [1, 0, 0]);
+});
+
+scene.getCameraController().resize(canvas.width, canvas.height);
+
+function frame() {
+  const drawn = scene.renderFrame(); // number of nodes drawn
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+```
+
+`SceneTemplate` uses the managers below internally; reach for them directly when you need finer control. You can also switch shapes on a standalone renderer: `new InstancedRenderer(gpu, 1000, "circle")` or `renderer.setShapeMode("quad")`.
 
 ### Pick entities with `PickingController`
 

@@ -15,6 +15,7 @@ describe("public API barrel", () => {
       "InstancedRenderer",
       "PickingController",
       "QuadGeometry",
+      "SceneTemplate",
     ]);
   });
 
