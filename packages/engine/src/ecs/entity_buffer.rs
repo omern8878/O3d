@@ -139,6 +139,13 @@ impl EntityBuffer {
 }
 
 impl EntityBuffer {
+    /// The stable ID of the entity stored at `dense_index`, or `None` if that
+    /// slot is not active (or its ID does not fit in `u32`).
+    pub(crate) fn entity_id_at_dense(&self, dense_index: usize) -> Option<u32> {
+        let entity_id = self.index.entity_id_at_dense(dense_index)?;
+        u32::try_from(entity_id).ok()
+    }
+
     /// Active positions: `[x, y, z]` per entity, in dense order.
     pub(crate) fn positions_slice(&self) -> &[f32] {
         &self.positions[..self.active_float_count()]

@@ -8,6 +8,7 @@ pub mod memory;
 
 pub use ecs::culling_buffer::CullingBuffer;
 pub use ecs::entity_buffer::EntityBuffer;
+pub use ecs::picker::ScenePicker;
 pub use init::init_engine;
 pub use math::camera::{Camera, ProjectionMode};
 pub use memory::wasm_memory;

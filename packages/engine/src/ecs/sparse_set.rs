@@ -94,6 +94,11 @@ impl SparseSet {
     }
 
     /// Number of live entities.
+    /// The entity ID stored at `dense_index`, or `None` past the active range.
+    pub fn entity_id_at_dense(&self, dense_index: usize) -> Option<usize> {
+        self.dense_to_sparse.get(dense_index).copied()
+    }
+
     pub fn active_count(&self) -> usize {
         self.active_count
     }

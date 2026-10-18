@@ -17,6 +17,7 @@ Rust ECS in Wasm memory ──zero-copy views──▶ dirty-range tracking ─�
 | Idle = 0 bytes | Unchanged scenes upload nothing; edits upload only the touched slice. |
 | One draw call | All entities render as instanced quads in a single `draw`. |
 | Culled on the CPU | Gribb-Hartmann frustum culling with stream compaction sends only visible instances. |
+| Pixel-accurate picking | Click or tap any point to get the entity under it, nearest-first, in 2D and 3D. |
 | Read-only by type | Consumers receive immutable views; the engine owns all writes. |
 | Panic-free boundary | Invalid input from JavaScript cannot crash the Wasm module. |
 
@@ -28,6 +29,7 @@ Rust ECS in Wasm memory ──zero-copy views──▶ dirty-range tracking ─�
 - **Pay only for what changes.** A static scene costs almost nothing per frame; moving one object uploads a few bytes.
 - **Stay smooth on mobile.** Fewer uploads, one draw call and culling of off-screen objects save bandwidth, fill-rate and battery.
 - **Simple, safe API.** You work with stable entity IDs, plain objects and read-only views. Bad input is ignored instead of crashing the engine.
+- **Built-in picking.** Turn a mouse or touch position into a stable `EntityId` with one call; no GPU readback or picking pass.
 - **2D and 3D from one renderer.** Orthographic and perspective cameras, pan, zoom and orbit controls are built in.
 
 ## How It Works
@@ -93,6 +95,14 @@ Six normalized frustum planes are extracted directly from the column-major view-
 | Nothing visible | Clear the screen only | None; draw skipped |
 
 When the view returns to "everything visible", all entities are marked dirty once so the GPU resynchronizes with the full arrays.
+
+### Raycasting & Spatial Picking
+A screen point is unprojected through the **inverse view-projection matrix** (adjugate/determinant inverse, rejected when singular) into a world-space ray from the near plane (`z = 0`) to the far plane (`z = 1`) of WebGPU's clip range. Wasm intersects the ray with each entity's bounding sphere (radius `0.5 * largest scale component`) and keeps the **nearest hit along the ray**, so overlapping entities resolve by depth in both orthographic and perspective views.
+
+- **Stable results:** picking returns the entity's `EntityId`, not its storage index, so it stays correct after removals reorder the data.
+- **No GPU round-trip:** the query runs on the data already in Wasm memory.
+- **Safe on bad input:** non-finite coordinates, an empty scene or a non-invertible camera simply return `null`.
+- **Approximation:** spheres inscribe the entity's box, so a pick never lands outside an entity, but the corners of a square are not pickable.
 
 ---
 
@@ -182,6 +192,33 @@ const orbit = new CameraController({
 });
 orbit.orbit(0.02, -0.01); // azimuth, elevation (radians)
 ```
+
+### Pick entities with `PickingController`
+
+```ts
+import { PickingController } from "@engine/templates";
+
+const picking = new PickingController();
+
+canvas.addEventListener("pointerdown", (event) => {
+  const id = picking.pickAtScreenCoords(
+    event.clientX,
+    event.clientY,
+    canvas.getBoundingClientRect(), // { left, top, width, height }
+    entities,
+    camera,
+  );
+
+  if (id !== null) {
+    entities.updateEntity(id, { color: "#ffffff" }); // highlight the clicked entity
+  }
+});
+
+// Already have normalized device coordinates (x, y in [-1, 1], +Y up)?
+const hit = picking.pickByNdc(0, 0, entities, camera); // EntityId | null
+```
+
+Works with both `"2d"` and `"3d"` cameras, and the nearest entity under the pointer wins.
 
 ### Render with `InstancedRenderer`
 

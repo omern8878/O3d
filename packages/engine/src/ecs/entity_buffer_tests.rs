@@ -168,3 +168,17 @@ fn operations_on_an_empty_buffer_do_not_panic() {
     assert!(buf.scales_slice().is_empty());
     assert!(buf.colors_slice().is_empty());
 }
+
+#[test]
+fn entity_id_at_dense_follows_swap_and_pop_and_ignores_inactive_slots() {
+    let mut buf = EntityBuffer::new(3);
+    let a = buf.allocate_entity();
+    let b = buf.allocate_entity();
+    let c = buf.allocate_entity();
+    buf.remove_entity(a);
+
+    assert_eq!(buf.entity_id_at_dense(0), Some(c as u32));
+    assert_eq!(buf.entity_id_at_dense(1), Some(b as u32));
+    assert_eq!(buf.entity_id_at_dense(2), None);
+    assert_eq!(buf.entity_id_at_dense(usize::MAX), None);
+}
