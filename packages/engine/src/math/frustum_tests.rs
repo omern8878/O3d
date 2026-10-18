@@ -5,7 +5,10 @@ const TOLERANCE: f32 = 1e-4;
 
 fn assert_close(actual: &[f32], expected: &[f32]) {
     for (a, e) in actual.iter().zip(expected) {
-        assert!((a - e).abs() < TOLERANCE, "expected {expected:?}, got {actual:?}");
+        assert!(
+            (a - e).abs() < TOLERANCE,
+            "expected {expected:?}, got {actual:?}"
+        );
     }
 }
 
@@ -95,7 +98,10 @@ fn ortho_culls_on_every_side() {
         [0.0, -250.0, 0.0],
         [0.0, 250.0, 0.0],
     ] {
-        assert!(!frustum.contains_entity(pos, scale), "{pos:?} should be culled");
+        assert!(
+            !frustum.contains_entity(pos, scale),
+            "{pos:?} should be culled"
+        );
     }
 }
 

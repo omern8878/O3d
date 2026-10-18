@@ -130,8 +130,7 @@ impl Camera {
                     (self.ortho_half_height * factor).max(MIN_ORTHO_HALF_HEIGHT);
             }
             ProjectionMode::Perspective3D => {
-                let Some(mut spherical) = Spherical::from_offset(sub(self.eye, self.target))
-                else {
+                let Some(mut spherical) = Spherical::from_offset(sub(self.eye, self.target)) else {
                     return;
                 };
                 spherical.radius = (spherical.radius * factor).clamp(

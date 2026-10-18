@@ -5,7 +5,10 @@ const TOLERANCE: f32 = 1e-5;
 fn assert_close(actual: &[f32], expected: &[f32]) {
     assert_eq!(actual.len(), expected.len());
     for (a, e) in actual.iter().zip(expected) {
-        assert!((a - e).abs() < TOLERANCE, "expected {expected:?}, got {actual:?}");
+        assert!(
+            (a - e).abs() < TOLERANCE,
+            "expected {expected:?}, got {actual:?}"
+        );
     }
 }
 
@@ -34,7 +37,10 @@ fn project(m: &Mat4, point: [f32; 3]) -> [f32; 3] {
 #[test]
 fn identity_leaves_points_unchanged() {
     let point = [3.0, -4.0, 5.0];
-    assert_close(&Mat4::identity().transform_point3(point), &[3.0, -4.0, 5.0, 1.0]);
+    assert_close(
+        &Mat4::identity().transform_point3(point),
+        &[3.0, -4.0, 5.0, 1.0],
+    );
 }
 
 #[test]
@@ -57,8 +63,14 @@ fn multiply_applies_the_right_hand_matrix_first() {
     let scale_then_translate = translation(10.0, 0.0, 0.0).multiply(&scale(2.0));
     let translate_then_scale = scale(2.0).multiply(&translation(10.0, 0.0, 0.0));
 
-    assert_close(&scale_then_translate.transform_point3(point), &[12.0, 2.0, 2.0, 1.0]);
-    assert_close(&translate_then_scale.transform_point3(point), &[22.0, 2.0, 2.0, 1.0]);
+    assert_close(
+        &scale_then_translate.transform_point3(point),
+        &[12.0, 2.0, 2.0, 1.0],
+    );
+    assert_close(
+        &translate_then_scale.transform_point3(point),
+        &[22.0, 2.0, 2.0, 1.0],
+    );
 }
 
 #[test]
@@ -114,16 +126,28 @@ fn perspective_with_90_degree_fov_maps_the_frustum_edge_to_one() {
 fn look_at_moves_the_eye_to_the_origin_looking_down_negative_z() {
     let view = Mat4::look_at_rh([0.0, 0.0, 10.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
 
-    assert_close(&view.transform_point3([0.0, 0.0, 10.0]), &[0.0, 0.0, 0.0, 1.0]);
-    assert_close(&view.transform_point3([0.0, 0.0, 0.0]), &[0.0, 0.0, -10.0, 1.0]);
+    assert_close(
+        &view.transform_point3([0.0, 0.0, 10.0]),
+        &[0.0, 0.0, 0.0, 1.0],
+    );
+    assert_close(
+        &view.transform_point3([0.0, 0.0, 0.0]),
+        &[0.0, 0.0, -10.0, 1.0],
+    );
 }
 
 #[test]
 fn look_at_keeps_world_axes_for_a_camera_on_the_z_axis() {
     let view = Mat4::look_at_rh([0.0, 0.0, 10.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
 
-    assert_close(&view.transform_point3([1.0, 0.0, 10.0]), &[1.0, 0.0, 0.0, 1.0]);
-    assert_close(&view.transform_point3([0.0, 1.0, 10.0]), &[0.0, 1.0, 0.0, 1.0]);
+    assert_close(
+        &view.transform_point3([1.0, 0.0, 10.0]),
+        &[1.0, 0.0, 0.0, 1.0],
+    );
+    assert_close(
+        &view.transform_point3([0.0, 1.0, 10.0]),
+        &[0.0, 1.0, 0.0, 1.0],
+    );
 }
 
 #[test]
@@ -131,9 +155,15 @@ fn look_at_rotates_the_view_for_an_off_axis_eye() {
     // Camera on +X looking at the origin: world -X is straight ahead.
     let view = Mat4::look_at_rh([5.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
 
-    assert_close(&view.transform_point3([0.0, 0.0, 0.0]), &[0.0, 0.0, -5.0, 1.0]);
+    assert_close(
+        &view.transform_point3([0.0, 0.0, 0.0]),
+        &[0.0, 0.0, -5.0, 1.0],
+    );
     // The camera's right-hand side is world -Z, which is +X in view space.
-    assert_close(&view.transform_point3([5.0, 0.0, -1.0]), &[1.0, 0.0, 0.0, 1.0]);
+    assert_close(
+        &view.transform_point3([5.0, 0.0, -1.0]),
+        &[1.0, 0.0, 0.0, 1.0],
+    );
 }
 
 #[test]

@@ -28,7 +28,10 @@ impl Plane {
     pub fn from_coefficients(a: f32, b: f32, c: f32, d: f32) -> Self {
         let length = (a * a + b * b + c * c).sqrt();
         if length < MIN_NORMAL_LENGTH {
-            return Plane { normal: [0.0; 3], d: 0.0 };
+            return Plane {
+                normal: [0.0; 3],
+                d: 0.0,
+            };
         }
         Plane {
             normal: [a / length, b / length, c / length],

@@ -77,6 +77,7 @@ impl Mat4 {
     ///
     /// Degenerate input (`eye == target`, or `up` parallel to the view
     /// direction) yields zero basis vectors rather than NaNs.
+    #[rustfmt::skip] // keeps the 4x4 literal laid out as columns
     pub fn look_at_rh(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> Self {
         let forward = normalize(sub(target, eye));
         let right = normalize(cross(forward, up));

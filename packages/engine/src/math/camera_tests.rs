@@ -4,7 +4,10 @@ const TOLERANCE: f32 = 1e-5;
 
 fn assert_close(actual: &[f32], expected: &[f32]) {
     for (a, e) in actual.iter().zip(expected) {
-        assert!((a - e).abs() < TOLERANCE, "expected {expected:?}, got {actual:?}");
+        assert!(
+            (a - e).abs() < TOLERANCE,
+            "expected {expected:?}, got {actual:?}"
+        );
     }
 }
 
