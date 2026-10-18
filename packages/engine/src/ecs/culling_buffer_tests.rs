@@ -154,3 +154,70 @@ fn pointers_address_the_packed_arrays() {
         culling.visible_colors.as_ptr()
     );
 }
+
+#[test]
+fn zero_initial_capacity_is_clamped_and_still_culls() {
+    let mut culling = CullingBuffer::new(0);
+
+    assert!(culling.visible_positions.capacity() >= FLOATS_PER_VEC3);
+    assert!(culling.visible_ids.capacity() >= 1);
+    assert_eq!(culling.cull(&scene(), &camera()), 4);
+}
+
+#[test]
+fn oversized_initial_capacity_is_clamped_instead_of_overflowing() {
+    for requested in [usize::MAX, usize::MAX / 3 + 1, MAX_INITIAL_CAPACITY + 1] {
+        let culling = CullingBuffer::new(requested);
+
+        assert!(
+            culling.visible_ids.capacity() <= MAX_INITIAL_CAPACITY * 2,
+            "requested {requested}"
+        );
+        assert_eq!(culling.visible_count(), 0);
+    }
+}
+
+#[test]
+fn culling_with_a_degenerate_camera_never_panics_or_corrupts_the_output() {
+    let mut camera = camera();
+    camera.set_aspect(f32::NAN);
+    camera.set_position(f32::INFINITY, 0.0, 0.0);
+    camera.set_ortho_zoom(f32::NAN);
+    camera.set_target(0.0, 0.0, 10.0);
+    camera.set_position(0.0, 0.0, 10.0);
+
+    let mut culling = CullingBuffer::new(1);
+    let visible = culling.cull(&scene(), &camera);
+
+    assert_eq!(visible, culling.visible_count());
+    assert_eq!(culling.visible_positions.len(), visible * FLOATS_PER_VEC3);
+    assert_eq!(culling.visible_ids.len(), visible);
+}
+
+#[test]
+fn entities_with_non_finite_data_are_culled_without_panicking() {
+    let mut buffer = EntityBuffer::new(2);
+    add(&mut buffer, [f32::NAN, 0.0, 0.0], 1.0);
+    add(&mut buffer, [0.0, f32::INFINITY, 0.0], 1.0);
+    add(&mut buffer, [0.0, 0.0, 0.0], f32::NAN);
+    add(&mut buffer, [1.0, 1.0, 0.0], 1.0);
+
+    let mut culling = CullingBuffer::new(1);
+    culling.cull(&buffer, &camera());
+
+    assert_eq!(culling.visible_ids.last(), Some(&3));
+    assert_eq!(
+        culling.visible_positions.len(),
+        culling.visible_count() * FLOATS_PER_VEC3
+    );
+}
+
+#[test]
+fn culling_an_empty_buffer_twice_stays_consistent() {
+    let mut culling = CullingBuffer::new(1);
+    let empty = EntityBuffer::new(0);
+
+    assert_eq!(culling.cull(&empty, &camera()), 0);
+    assert_eq!(culling.cull(&empty, &camera()), 0);
+    assert!(culling.visible_ids.is_empty());
+}

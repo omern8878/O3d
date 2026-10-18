@@ -2,6 +2,7 @@
 
 pub mod camera;
 pub mod frustum;
+pub mod input_guard;
 pub mod mat4;
 pub mod spherical;
 pub mod vec3;

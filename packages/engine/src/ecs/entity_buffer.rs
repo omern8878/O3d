@@ -26,6 +26,11 @@ use super::sparse_set::SparseSet;
 /// Number of `f32` components stored per entity in each attribute array.
 const FLOATS_PER_VEC3: usize = 3;
 
+/// Upper bound on the capacity a caller may request up front. Larger requests
+/// would exhaust Wasm memory (a trap, not a catchable error) or overflow the
+/// float count.
+const MAX_INITIAL_CAPACITY: usize = 1 << 22;
+
 /// Returned by `remove_entity` when no remaining dense slot was overwritten.
 const NO_SLOT_OVERWRITTEN: isize = -1;
 
@@ -44,12 +49,14 @@ pub struct EntityBuffer {
 
 #[wasm_bindgen]
 impl EntityBuffer {
-    /// Creates a buffer with room for `initial_capacity` entities.
+    /// Creates a buffer with room for `initial_capacity` entities, clamped to
+    /// `[1, 4_194_304]`.
     ///
     /// Arrays are zero-filled to full capacity so every slot JS may write into
     /// is initialized memory.
     #[wasm_bindgen(constructor)]
     pub fn new(initial_capacity: usize) -> EntityBuffer {
+        let initial_capacity = initial_capacity.clamp(1, MAX_INITIAL_CAPACITY);
         let floats = initial_capacity * FLOATS_PER_VEC3;
 
         EntityBuffer {
@@ -182,7 +189,7 @@ impl EntityBuffer {
 
     /// Doubles the slot count (minimum 1), zero-filling the new slots.
     fn grow(&mut self) {
-        let new_floats = self.slot_count().max(1) * 2 * FLOATS_PER_VEC3;
+        let new_floats = self.slot_count().max(1).saturating_mul(2 * FLOATS_PER_VEC3);
 
         for array in [&mut self.positions, &mut self.scales, &mut self.colors] {
             array.reserve_exact(new_floats - array.len());

@@ -2,11 +2,8 @@ import { EntityBuffer, wasm_memory } from "@engine/core/pkg/engine.js";
 import { DirtyTracker } from "../memory/dirty-tracker.ts";
 import { FLOATS_PER_VEC3 } from "../memory/vec3-layout.ts";
 import { WasmBufferView } from "../memory/wasm-buffer-view.ts";
-import type {
-  EntityId,
-  EntityTransform,
-  RawEntityViews,
-} from "../types/entity.types.ts";
+import type { EntityId, EntityTransform } from "../types/entity.types.ts";
+import type { ReadonlyRawEntityViews } from "../types/readonly-buffer.types.ts";
 import { parseColor } from "../utils/color.utils.ts";
 
 /**
@@ -63,14 +60,18 @@ export class EntityManager {
     }
   }
 
-  /** Tracks which dense indices changed since the GPU was last synchronized. */
+  /**
+   * Tracks which dense indices changed since the GPU was last synchronized.
+   * @internal Used by the renderer; calling `clear()` or marking ranges from
+   * outside desynchronizes the GPU copy.
+   */
   getDirtyTracker(): DirtyTracker {
     return this.dirtyTracker;
   }
 
   /**
    * The underlying Wasm buffer, for Wasm-side systems such as culling.
-   * Not for general use: mutating it directly bypasses dirty tracking.
+   * @internal Mutating it directly bypasses dirty tracking.
    */
   getRawWasmBuffer(): EntityBuffer {
     return this.buffer;
@@ -85,10 +86,11 @@ export class EntityManager {
   }
 
   /**
-   * Zero-copy views trimmed to the active entities, for read-only verification.
-   * They alias Wasm memory and become stale after the buffer grows.
+   * Read-only zero-copy views trimmed to the active entities. They alias Wasm
+   * memory and become stale after the buffer grows; write through
+   * {@link EntityManager.updateEntity} so changes are tracked for the GPU.
    */
-  getRawViews(): RawEntityViews {
+  getRawViews(): ReadonlyRawEntityViews {
     const end = this.buffer.active_count() * FLOATS_PER_VEC3;
     return {
       positions: this.view.getPositionsView().subarray(0, end),

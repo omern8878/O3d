@@ -7,6 +7,7 @@ use std::f32::consts::{FRAC_PI_2, PI};
 
 use wasm_bindgen::prelude::*;
 
+use super::input_guard::{is_valid_vec3, MAX_COORDINATE};
 use super::mat4::Mat4;
 use super::spherical::Spherical;
 use super::vec3::{add, sub};
@@ -16,6 +17,16 @@ const MIN_ORTHO_HALF_HEIGHT: f32 = 0.0001;
 
 /// Keeps orbit elevation just short of the poles, where `look_at` would flip.
 const MAX_ORBIT_ELEVATION: f32 = FRAC_PI_2 - 0.01;
+
+/// Largest orthographic half-height; keeps the projection finite.
+const MAX_ORTHO_HALF_HEIGHT: f32 = MAX_COORDINATE;
+
+/// Accepted aspect-ratio range; outside it the projection overflows.
+const MIN_ASPECT: f32 = 1.0e-4;
+const MAX_ASPECT: f32 = 1.0e4;
+
+/// Aspect ratio used when JS supplies an unusable one at construction.
+const DEFAULT_ASPECT: f32 = 1.0;
 
 /// Smallest accepted zoom factor; keeps zoom from collapsing to zero.
 const MIN_ZOOM_FACTOR: f32 = 0.001;
@@ -50,6 +61,8 @@ pub struct Camera {
 #[wasm_bindgen]
 impl Camera {
     /// Creates a 2D orthographic camera at `(0, 0, 10)` looking at the origin.
+    ///
+    /// An `aspect` that is non-finite or outside `[1e-4, 1e4]` falls back to `1.0`.
     #[wasm_bindgen(constructor)]
     pub fn new(aspect: f32) -> Self {
         let mut camera = Camera {
@@ -57,7 +70,11 @@ impl Camera {
             eye: [0.0, 0.0, 10.0],
             target: [0.0, 0.0, 0.0],
             up: [0.0, 1.0, 0.0],
-            aspect,
+            aspect: if is_valid_aspect(aspect) {
+                aspect
+            } else {
+                DEFAULT_ASPECT
+            },
             fov_y: PI / 4.0,
             ortho_half_height: 100.0,
             near: 0.1,
@@ -73,40 +90,64 @@ impl Camera {
         self.update_view_proj();
     }
 
+    /// Sets the aspect ratio. Non-finite values and values outside `[1e-4, 1e4]` are ignored.
     pub fn set_aspect(&mut self, aspect: f32) {
+        if !is_valid_aspect(aspect) {
+            return;
+        }
         self.aspect = aspect;
         self.update_view_proj();
     }
 
+    /// Moves the eye. Non-finite or out-of-range coordinates are ignored.
     pub fn set_position(&mut self, x: f32, y: f32, z: f32) {
+        if !is_valid_vec3([x, y, z]) {
+            return;
+        }
         self.eye = [x, y, z];
         self.update_view_proj();
     }
 
+    /// Moves the look-at target. Non-finite or out-of-range coordinates are
+    /// ignored.
     pub fn set_target(&mut self, x: f32, y: f32, z: f32) {
+        if !is_valid_vec3([x, y, z]) {
+            return;
+        }
         self.target = [x, y, z];
         self.update_view_proj();
     }
 
     /// Sets the orthographic half-height (world units from center to top edge).
-    /// Values at or below `0.0001` are clamped up to it.
+    /// Values are clamped to `[0.0001, 1e12]`; non-finite values are ignored.
     pub fn set_ortho_zoom(&mut self, half_height: f32) {
-        self.ortho_half_height = half_height.max(MIN_ORTHO_HALF_HEIGHT);
+        if !half_height.is_finite() {
+            return;
+        }
+        self.ortho_half_height = clamp_ortho_half_height(half_height);
         self.update_view_proj();
     }
 
     /// Slides the camera and its target together in the XY plane.
+    /// Ignored if the delta is non-finite or would leave the valid range.
     pub fn pan_2d(&mut self, dx: f32, dy: f32) {
-        self.eye[0] += dx;
-        self.eye[1] += dy;
-        self.target[0] += dx;
-        self.target[1] += dy;
+        let eye = [self.eye[0] + dx, self.eye[1] + dy, self.eye[2]];
+        let target = [self.target[0] + dx, self.target[1] + dy, self.target[2]];
+        if !is_valid_vec3(eye) || !is_valid_vec3(target) {
+            return;
+        }
+        self.eye = eye;
+        self.target = target;
         self.update_view_proj();
     }
 
     /// Orbits the eye around `target` on a sphere, keeping the distance.
-    /// Elevation is clamped just short of straight up / down.
+    /// Elevation is clamped just short of straight up / down. Does nothing for
+    /// non-finite deltas or when the eye coincides with the target.
     pub fn orbit_3d(&mut self, delta_azimuth: f32, delta_elevation: f32) {
+        if !delta_azimuth.is_finite() || !delta_elevation.is_finite() {
+            return;
+        }
         let Some(mut spherical) = Spherical::from_offset(sub(self.eye, self.target)) else {
             return;
         };
@@ -121,13 +162,16 @@ impl Camera {
     /// Zooms by multiplying the visible size (`Ortho2D`) or the eye-target
     /// distance (`Perspective3D`) by `factor`. Factors below `0.001` are
     /// raised to it, so `factor < 1` zooms in and `factor > 1` zooms out.
+    /// Non-finite factors are ignored.
     pub fn zoom_by_factor(&mut self, factor: f32) {
+        if !factor.is_finite() {
+            return;
+        }
         let factor = factor.max(MIN_ZOOM_FACTOR);
 
         match self.mode {
             ProjectionMode::Ortho2D => {
-                self.ortho_half_height =
-                    (self.ortho_half_height * factor).max(MIN_ORTHO_HALF_HEIGHT);
+                self.ortho_half_height = clamp_ortho_half_height(self.ortho_half_height * factor);
             }
             ProjectionMode::Perspective3D => {
                 let Some(mut spherical) = Spherical::from_offset(sub(self.eye, self.target)) else {
@@ -188,6 +232,15 @@ impl Camera {
         let view = Mat4::look_at_rh(self.eye, self.target, self.up);
         self.view_proj = self.projection().multiply(&view);
     }
+}
+
+fn is_valid_aspect(aspect: f32) -> bool {
+    (MIN_ASPECT..=MAX_ASPECT).contains(&aspect)
+}
+
+/// Clamps into the supported half-height range (`NaN` maps to the minimum).
+fn clamp_ortho_half_height(half_height: f32) -> f32 {
+    half_height.clamp(MIN_ORTHO_HALF_HEIGHT, MAX_ORTHO_HALF_HEIGHT)
 }
 
 #[cfg(test)]

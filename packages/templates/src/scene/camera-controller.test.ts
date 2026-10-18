@@ -137,4 +137,21 @@ describe("CameraController", () => {
     flat.zoom(0.5);
     assert.equal(flat.getRawWasmCamera().ortho_half_height(), 50);
   });
+
+  it("survives NaN, Infinity and zero inputs from JS with a finite matrix", () => {
+    const controller = new CameraController({ aspect: Number.NaN, mode: "3d" });
+    controller.zoom(Number.NaN);
+    controller.zoom(0);
+    controller.orbit(Number.POSITIVE_INFINITY, Number.NaN);
+    controller.setPosition(Number.NaN, 0, 0);
+    controller.setTarget(0, Number.POSITIVE_INFINITY, 0);
+    controller.resize(0, 0);
+    controller.setPosition(1, 1, 1);
+    controller.setTarget(1, 1, 1);
+
+    const camera = controller.getRawWasmCamera();
+    const m = new Float32Array((wasm_memory() as WebAssembly.Memory).buffer, camera.view_proj_ptr(), 16);
+    assert.ok(m.every(Number.isFinite));
+    assert.equal(camera.aspect(), 1);
+  });
 });

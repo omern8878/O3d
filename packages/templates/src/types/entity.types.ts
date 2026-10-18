@@ -16,14 +16,3 @@ export type EntityTransform = {
   scale?: Partial<Vec3>;
   color?: ColorInput;
 };
-
-/**
- * Zero-copy views over the active entities' data (`x y z` / `r g b` triplets,
- * one per entity). Intended for read-only inspection; they alias Wasm memory and
- * are invalidated by any call that can grow the buffer.
- */
-export type RawEntityViews = {
-  positions: Float32Array;
-  scales: Float32Array;
-  colors: Float32Array;
-};

@@ -18,6 +18,10 @@ use crate::math::frustum::Frustum;
 
 const FLOATS_PER_VEC3: usize = 3;
 
+/// Upper bound on the capacity a caller may request up front; see
+/// `EntityBuffer` for the rationale.
+const MAX_INITIAL_CAPACITY: usize = 1 << 22;
+
 /// Visible entities from the last `cull()`, packed in dense (original) order.
 #[wasm_bindgen]
 pub struct CullingBuffer {
@@ -31,9 +35,11 @@ pub struct CullingBuffer {
 
 #[wasm_bindgen]
 impl CullingBuffer {
-    /// Reserves room for `initial_capacity` visible entities.
+    /// Reserves room for `initial_capacity` visible entities, clamped to
+    /// `[1, 4_194_304]`.
     #[wasm_bindgen(constructor)]
     pub fn new(initial_capacity: usize) -> CullingBuffer {
+        let initial_capacity = initial_capacity.clamp(1, MAX_INITIAL_CAPACITY);
         let floats = initial_capacity * FLOATS_PER_VEC3;
         CullingBuffer {
             visible_positions: Vec::with_capacity(floats),
