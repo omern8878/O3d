@@ -11,6 +11,12 @@
 
 use super::vec3::{cross, dot, normalize, sub};
 
+/// Determinants below this are treated as singular (not invertible).
+const MIN_INVERTIBLE_DETERMINANT: f64 = 1e-12;
+
+/// `w` components below this cannot be safely divided by.
+const MIN_PROJECTIVE_W: f32 = 1e-12;
+
 /// View direction used when `eye == target`.
 const DEFAULT_FORWARD: [f32; 3] = [0.0, 0.0, -1.0];
 
@@ -100,6 +106,68 @@ impl Mat4 {
             right[2], true_up[2], -forward[2], 0.0,
             -dot(right, eye), -dot(true_up, eye), dot(forward, eye), 1.0,
         ])
+    }
+
+    /// The inverse matrix, or `None` if it is singular or non-finite.
+    ///
+    /// Uses adjugate expansion over 2x2 sub-determinants. The arithmetic runs
+    /// in `f64` so that `M * M^-1` stays close to the identity even for the
+    /// badly scaled matrices projections produce.
+    pub fn inverse(&self) -> Option<Self> {
+        let a = self.0.map(f64::from);
+
+        let s0 = a[0] * a[5] - a[4] * a[1];
+        let s1 = a[0] * a[6] - a[4] * a[2];
+        let s2 = a[0] * a[7] - a[4] * a[3];
+        let s3 = a[1] * a[6] - a[5] * a[2];
+        let s4 = a[1] * a[7] - a[5] * a[3];
+        let s5 = a[2] * a[7] - a[6] * a[3];
+        let c5 = a[10] * a[15] - a[14] * a[11];
+        let c4 = a[9] * a[15] - a[13] * a[11];
+        let c3 = a[9] * a[14] - a[13] * a[10];
+        let c2 = a[8] * a[15] - a[12] * a[11];
+        let c1 = a[8] * a[14] - a[12] * a[10];
+        let c0 = a[8] * a[13] - a[12] * a[9];
+
+        let determinant = s0 * c5 - s1 * c4 + s2 * c3 + s3 * c2 - s4 * c1 + s5 * c0;
+        if !determinant.is_finite() || determinant.abs() < MIN_INVERTIBLE_DETERMINANT {
+            return None;
+        }
+        let inv = 1.0 / determinant;
+
+        let adjugate_over_det = [
+            (a[5] * c5 - a[6] * c4 + a[7] * c3) * inv,
+            (-a[1] * c5 + a[2] * c4 - a[3] * c3) * inv,
+            (a[13] * s5 - a[14] * s4 + a[15] * s3) * inv,
+            (-a[9] * s5 + a[10] * s4 - a[11] * s3) * inv,
+            (-a[4] * c5 + a[6] * c2 - a[7] * c1) * inv,
+            (a[0] * c5 - a[2] * c2 + a[3] * c1) * inv,
+            (-a[12] * s5 + a[14] * s2 - a[15] * s1) * inv,
+            (a[8] * s5 - a[10] * s2 + a[11] * s1) * inv,
+            (a[4] * c4 - a[5] * c2 + a[7] * c0) * inv,
+            (-a[0] * c4 + a[1] * c2 - a[3] * c0) * inv,
+            (a[12] * s4 - a[13] * s2 + a[15] * s0) * inv,
+            (-a[8] * s4 + a[9] * s2 - a[11] * s0) * inv,
+            (-a[4] * c3 + a[5] * c1 - a[6] * c0) * inv,
+            (a[0] * c3 - a[1] * c1 + a[2] * c0) * inv,
+            (-a[12] * s3 + a[13] * s1 - a[14] * s0) * inv,
+            (a[8] * s3 - a[9] * s1 + a[10] * s0) * inv,
+        ];
+
+        let inverse = Mat4(adjugate_over_det.map(|value| value as f32));
+        inverse.0.iter().all(|v| v.is_finite()).then_some(inverse)
+    }
+
+    /// Transforms `point` as `(x, y, z, 1)` and performs the perspective
+    /// divide. Returns `None` if `w` is too close to zero (a point at infinity
+    /// or on the camera plane) or the result is not finite.
+    pub fn transform_point3_projective(&self, point: [f32; 3]) -> Option<[f32; 3]> {
+        let [x, y, z, w] = self.transform_point3(point);
+        if !w.is_finite() || w.abs() < MIN_PROJECTIVE_W {
+            return None;
+        }
+        let divided = [x / w, y / w, z / w];
+        divided.iter().all(|v| v.is_finite()).then_some(divided)
     }
 
     /// Unit vector perpendicular to `forward` and `up`, trying fallback up axes

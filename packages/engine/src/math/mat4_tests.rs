@@ -1,4 +1,5 @@
 use super::*;
+use crate::math::camera::{Camera, ProjectionMode};
 
 const TOLERANCE: f32 = 1e-5;
 
@@ -208,4 +209,175 @@ fn look_at_with_a_zero_up_vector_keeps_a_valid_basis() {
     let view = Mat4::look_at_rh([0.0, 0.0, 10.0], [0.0; 3], [0.0; 3]);
 
     assert_orthonormal_view(&view);
+}
+
+/// Projection matrices mix entries from 1e-3 to 1e3, so f32 rounding alone
+/// leaves ~1e-4 of error; a wrong inverse is off by O(1).
+const IDENTITY_TOLERANCE: f32 = 1e-3;
+
+fn assert_identity(m: &Mat4) {
+    for (i, (actual, expected)) in m.0.iter().zip(Mat4::identity().0).enumerate() {
+        assert!(
+            (actual - expected).abs() < IDENTITY_TOLERANCE,
+            "element {i}: expected {expected}, got {actual} in {:?}",
+            m.0
+        );
+    }
+}
+
+fn camera_view_proj(mode: ProjectionMode) -> Mat4 {
+    let mut camera = Camera::new(16.0 / 9.0);
+    camera.set_mode(mode);
+    camera.set_position(3.0, 4.0, 10.0);
+    camera.set_target(1.0, -2.0, 0.0);
+    *camera.view_proj_mat()
+}
+
+#[test]
+fn inverse_of_the_identity_is_the_identity() {
+    assert_eq!(Mat4::identity().inverse(), Some(Mat4::identity()));
+}
+
+#[test]
+fn inverse_undoes_an_ortho2d_camera_view_proj() {
+    let view_proj = camera_view_proj(ProjectionMode::Ortho2D);
+    let inverse = view_proj.inverse().expect("ortho view_proj is invertible");
+
+    assert_identity(&view_proj.multiply(&inverse));
+    assert_identity(&inverse.multiply(&view_proj));
+}
+
+#[test]
+fn inverse_undoes_a_perspective3d_camera_view_proj() {
+    let view_proj = camera_view_proj(ProjectionMode::Perspective3D);
+    let inverse = view_proj
+        .inverse()
+        .expect("perspective view_proj is invertible");
+
+    assert_identity(&view_proj.multiply(&inverse));
+    assert_identity(&inverse.multiply(&view_proj));
+}
+
+#[test]
+fn inverse_of_a_translation_negates_it() {
+    let inverse = translation(1.0, -2.0, 3.0).inverse().unwrap();
+
+    assert_close(&inverse.0, &translation(-1.0, 2.0, -3.0).0);
+}
+
+#[test]
+fn inverse_of_a_scale_is_the_reciprocal_scale() {
+    let inverse = scale(4.0).inverse().unwrap();
+
+    assert_close(&[inverse.0[0]], &[0.25]);
+}
+
+#[test]
+fn inverse_of_an_inverse_returns_the_original() {
+    let original = camera_view_proj(ProjectionMode::Perspective3D);
+    let round_trip = original.inverse().unwrap().inverse().unwrap();
+
+    for (a, b) in round_trip.0.iter().zip(original.0) {
+        let allowed = IDENTITY_TOLERANCE * b.abs().max(1.0);
+        assert!((a - b).abs() < allowed, "{a} vs {b}");
+    }
+}
+
+#[test]
+fn inverse_of_an_asymmetric_matrix_is_exact_in_both_orders() {
+    let m = Mat4([
+        2.0, 0.0, 1.0, 0.0, //
+        1.0, 3.0, 0.0, 0.0, //
+        0.0, 1.0, 4.0, 0.0, //
+        5.0, -6.0, 7.0, 1.0,
+    ]);
+    let inverse = m.inverse().unwrap();
+
+    assert_identity(&m.multiply(&inverse));
+    assert_identity(&inverse.multiply(&m));
+}
+
+#[test]
+fn singular_matrices_have_no_inverse() {
+    assert_eq!(Mat4([0.0; 16]).inverse(), None);
+
+    let mut flat = Mat4::identity();
+    flat.0[5] = 0.0; // collapses the Y axis
+    assert_eq!(flat.inverse(), None);
+
+    let duplicated_rows = Mat4([
+        1.0, 1.0, 0.0, 0.0, //
+        2.0, 2.0, 0.0, 0.0, //
+        3.0, 3.0, 1.0, 0.0, //
+        4.0, 4.0, 0.0, 1.0,
+    ]);
+    assert_eq!(duplicated_rows.inverse(), None);
+}
+
+#[test]
+fn nearly_singular_and_non_finite_matrices_have_no_inverse() {
+    let mut tiny = Mat4::identity();
+    tiny.0[0] = 1e-13;
+    assert_eq!(tiny.inverse(), None);
+
+    for bad in [f32::NAN, f32::INFINITY] {
+        let mut m = Mat4::identity();
+        m.0[7] = bad;
+        assert_eq!(m.inverse(), None, "{bad}");
+    }
+}
+
+#[test]
+fn projective_transform_divides_by_w() {
+    let mut half_w = Mat4::identity();
+    half_w.0[15] = 2.0;
+
+    assert_eq!(
+        half_w.transform_point3_projective([4.0, 6.0, 8.0]),
+        Some([2.0, 3.0, 4.0])
+    );
+}
+
+#[test]
+fn projective_transform_matches_the_homogeneous_result_for_a_camera() {
+    let view_proj = camera_view_proj(ProjectionMode::Perspective3D);
+    let point = [1.0, -2.0, 0.0];
+    let [x, y, z, w] = view_proj.transform_point3(point);
+
+    assert_close(
+        &view_proj.transform_point3_projective(point).unwrap(),
+        &[x / w, y / w, z / w],
+    );
+}
+
+#[test]
+fn projective_transform_rejects_a_zero_or_non_finite_w() {
+    let mut zero_w = Mat4::identity();
+    zero_w.0[15] = 0.0;
+    assert_eq!(zero_w.transform_point3_projective([1.0, 2.0, 3.0]), None);
+
+    let mut tiny_w = Mat4::identity();
+    tiny_w.0[15] = 1e-13;
+    assert_eq!(tiny_w.transform_point3_projective([1.0, 2.0, 3.0]), None);
+
+    assert_eq!(
+        Mat4::identity().transform_point3_projective([f32::NAN, 0.0, 0.0]),
+        None
+    );
+}
+
+#[test]
+fn unprojecting_a_projected_point_round_trips() {
+    for mode in [ProjectionMode::Ortho2D, ProjectionMode::Perspective3D] {
+        let view_proj = camera_view_proj(mode);
+        let inverse = view_proj.inverse().unwrap();
+        let point = [2.0, 1.0, -3.0];
+
+        let ndc = view_proj.transform_point3_projective(point).unwrap();
+        let back = inverse.transform_point3_projective(ndc).unwrap();
+
+        for (a, b) in back.iter().zip(point) {
+            assert!((a - b).abs() < 1e-2, "{back:?} vs {point:?}");
+        }
+    }
 }

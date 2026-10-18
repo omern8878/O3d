@@ -13,6 +13,7 @@ describe("public API barrel", () => {
       "GpuInstanceBuffers",
       "INSTANCED_QUAD_WGSL",
       "InstancedRenderer",
+      "PickingController",
       "QuadGeometry",
     ]);
   });

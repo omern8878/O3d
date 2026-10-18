@@ -53,3 +53,17 @@ fn rejects_unknown_and_double_removal() {
     assert_eq!(set.remove(99), None);
     assert_eq!(set.get_dense_index(99), None);
 }
+
+#[test]
+fn entity_id_at_dense_reports_the_id_stored_in_each_active_slot() {
+    let mut set = SparseSet::with_capacity(3);
+    let (a, _) = set.allocate();
+    let (b, _) = set.allocate();
+    let (c, _) = set.allocate();
+    set.remove(a);
+
+    assert_eq!(set.entity_id_at_dense(0), Some(c));
+    assert_eq!(set.entity_id_at_dense(1), Some(b));
+    assert_eq!(set.entity_id_at_dense(2), None);
+    assert_eq!(set.entity_id_at_dense(usize::MAX), None);
+}
