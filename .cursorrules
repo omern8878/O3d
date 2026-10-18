@@ -8,7 +8,10 @@ followed for all new code and all refactors.
   This applies above all to `lib.rs`, `index.ts` and `main.ts`.
 - One primary struct / class / module per file. Small private helpers that exist
   only to serve that primary type may live next to it; anything else gets its own file.
-- Rust unit tests live in the same file as the type they test (`#[cfg(test)] mod tests`).
+- Never write inline unit test bodies inside Rust implementation files. Always place
+  Rust unit tests in a separate sibling `<module>_tests.rs` file linked via
+  `#[cfg(test)] #[path = "<module>_tests.rs"] mod tests;`. The implementation file
+  keeps only that three-line declaration at the bottom.
 - TypeScript unit tests live next to the file they test as `<name>.test.ts`; shared
   test doubles go in `testing/` and are never exported from the `index.ts` barrel.
 
