@@ -132,6 +132,41 @@ impl EntityBuffer {
 }
 
 impl EntityBuffer {
+    /// Active positions: `[x, y, z]` per entity, in dense order.
+    pub(crate) fn positions_slice(&self) -> &[f32] {
+        &self.positions[..self.active_float_count()]
+    }
+
+    /// Active scales: `[x, y, z]` per entity, in dense order.
+    pub(crate) fn scales_slice(&self) -> &[f32] {
+        &self.scales[..self.active_float_count()]
+    }
+
+    /// Active colors: `[r, g, b]` per entity, in dense order.
+    pub(crate) fn colors_slice(&self) -> &[f32] {
+        &self.colors[..self.active_float_count()]
+    }
+
+    /// Test hook: sets every attribute of a live entity from Rust.
+    #[cfg(test)]
+    pub(crate) fn write_entity(
+        &mut self,
+        entity_id: usize,
+        position: [f32; 3],
+        scale: [f32; 3],
+        color: [f32; 3],
+    ) {
+        let dense_idx = self.get_dense_index(entity_id).unwrap();
+        Self::write_vec3(&mut self.positions, dense_idx, position);
+        Self::write_vec3(&mut self.scales, dense_idx, scale);
+        Self::write_vec3(&mut self.colors, dense_idx, color);
+    }
+
+    /// Number of `f32`s in use per attribute array.
+    fn active_float_count(&self) -> usize {
+        self.index.active_count() * FLOATS_PER_VEC3
+    }
+
     /// Allocates a zero-filled array of `floats` elements.
     fn zeroed_array(floats: usize) -> Vec<f32> {
         let mut array = Vec::with_capacity(floats);

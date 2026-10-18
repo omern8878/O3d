@@ -1,3 +1,4 @@
+export { CullingManager } from "./scene/culling-manager.ts";
 export { CameraController } from "./scene/camera-controller.ts";
 export { EntityManager } from "./scene/entity-manager.ts";
 export { GpuContext } from "./renderer/gpu-context.ts";
@@ -14,4 +15,5 @@ export type {
   Vec3,
 } from "./types/entity.types.ts";
 export type { CameraConfig, CameraMode } from "./types/camera.types.ts";
+export type { VisibleViews } from "./types/culling.types.ts";
 export type { ClearColor, RendererConfig } from "./types/renderer.types.ts";

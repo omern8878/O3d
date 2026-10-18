@@ -113,4 +113,57 @@ describe("GpuInstanceBuffers", () => {
 
     assert.ok(device.buffers.every((b) => b.destroyed));
   });
+
+  describe("syncFromVisibleViews", () => {
+    const views = (count: number) => {
+      const floats = (offset: number) =>
+        new Float32Array(count * 3 + 6).map((_, i) => i + offset); // longer than needed on purpose
+      return {
+        positions: floats(0),
+        scales: floats(100),
+        colors: floats(200),
+        visibleCount: count,
+      };
+    };
+
+    it("returns 0 and uploads nothing when nothing is visible", () => {
+      const device = createMockDevice();
+      const buffers = new GpuInstanceBuffers(device, 4);
+
+      assert.equal(buffers.syncFromVisibleViews(views(0)), 0);
+      assert.equal(device.writes.length, 0);
+    });
+
+    it("uploads exactly visibleCount * 3 floats per channel at offset 0", () => {
+      const device = createMockDevice();
+      const buffers = new GpuInstanceBuffers(device, 8);
+      const input = views(3);
+
+      assert.equal(buffers.syncFromVisibleViews(input), 3);
+
+      assert.deepEqual(
+        device.writes.map((w) => w.buffer),
+        [buffers.positionsBuffer, buffers.scalesBuffer, buffers.colorsBuffer],
+      );
+      device.writes.forEach((write, i) => {
+        assert.equal(write.offset, 0);
+        assert.equal(write.data.length, 9);
+        assert.equal(write.data.buffer, [input.positions, input.scales, input.colors][i]!.buffer);
+      });
+    });
+
+    it("grows the GPU buffers when more instances are visible than fit", () => {
+      const device = createMockDevice();
+      const buffers = new GpuInstanceBuffers(device, 2);
+      const old = [...device.buffers];
+
+      buffers.syncFromVisibleViews(views(5));
+
+      assert.ok(old.every((b) => b.destroyed));
+      assert.equal(buffers.gpuCapacity, 5);
+      assert.equal(buffers.positionsBuffer.size, 5 * BYTES_PER_INSTANCE);
+      assert.equal(device.writes[0]!.buffer, buffers.positionsBuffer);
+      assert.equal(device.writes[0]!.data.length, 15);
+    });
+  });
 });

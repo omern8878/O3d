@@ -63,4 +63,20 @@ describe("DirtyTracker", () => {
       assert.equal(tracker.getRange(channel, 5), null);
     }
   });
+
+  it("markAllDirty covers entities 0 .. activeCount - 1 on every channel", () => {
+    const tracker = new DirtyTracker();
+    tracker.markAllDirty(5);
+
+    for (const channel of ["position", "scale", "color"] as const) {
+      assert.deepEqual(tracker.getRange(channel, 5), { min: 0, max: 4 });
+    }
+  });
+
+  it("markAllDirty does nothing when there are no entities", () => {
+    const tracker = new DirtyTracker();
+    tracker.markAllDirty(0);
+
+    assert.equal(tracker.getRange("position", 10), null);
+  });
 });

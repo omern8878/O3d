@@ -13,7 +13,7 @@ fn assert_close(actual: &[f32], expected: &[f32]) {
 
 /// World point -> normalized device coordinates.
 fn to_clip(camera: &Camera, point: [f32; 3]) -> [f32; 3] {
-    let [x, y, z, w] = camera.view_proj().transform_point3(point);
+    let [x, y, z, w] = camera.view_proj_mat().transform_point3(point);
     [x / w, y / w, z / w]
 }
 
@@ -68,7 +68,7 @@ fn ortho_zoom_scales_the_visible_area_and_is_clamped() {
     assert_close(&to_clip(&camera, [50.0, 50.0, 0.0])[..2], &[1.0, 1.0]);
 
     camera.set_ortho_zoom(-5.0);
-    assert!(camera.view_proj().0.iter().all(|v| v.is_finite()));
+    assert!(camera.view_proj_mat().0.iter().all(|v| v.is_finite()));
     assert_close(&to_clip(&camera, [0.0001, 0.0, 0.0])[..1], &[1.0]);
 }
 
@@ -138,7 +138,7 @@ fn orbit_3d_clamps_elevation_short_of_the_poles() {
     camera.orbit_3d(0.0, -100.0);
     let down = sub(camera.eye, camera.target)[1] / distance(camera.eye, camera.target);
     assert!((down + MAX_ORBIT_ELEVATION.sin()).abs() < 1e-5);
-    assert!(camera.view_proj().0.iter().all(|v| v.is_finite()));
+    assert!(camera.view_proj_mat().0.iter().all(|v| v.is_finite()));
 }
 
 #[test]
@@ -207,5 +207,5 @@ fn view_proj_ptr_exposes_the_sixteen_floats_of_the_matrix() {
     let camera = Camera::new(1.0);
     let exposed = unsafe { std::slice::from_raw_parts(camera.view_proj_ptr(), 16) };
 
-    assert_eq!(exposed, &camera.view_proj().0);
+    assert_eq!(exposed, &camera.view_proj_mat().0);
 }

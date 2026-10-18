@@ -1,6 +1,8 @@
 import { wasm_memory, type Camera } from "@engine/core/pkg/engine.js";
 import { QuadGeometry } from "../geometry/quad-geometry.ts";
 import { BYTES_PER_FLOAT, BYTES_PER_VEC3 } from "../memory/vec3-layout.ts";
+import type { CameraController } from "../scene/camera-controller.ts";
+import type { CullingManager } from "../scene/culling-manager.ts";
 import type { EntityManager } from "../scene/entity-manager.ts";
 import { CameraUniformBuffer } from "./camera-uniform-buffer.ts";
 import { GpuInstanceBuffers } from "./gpu-buffer-sync.ts";
@@ -43,6 +45,8 @@ export class InstancedRenderer {
   private readonly instanceBuffers: GpuInstanceBuffers;
   private readonly cameraUniform: CameraUniformBuffer;
   private readonly pipeline: GPURenderPipeline;
+  /** Whether the instance buffers currently hold a culled subset, not the dense arrays. */
+  private holdsCulledSubset = false;
 
   constructor(gpuContext: GpuContext, initialCapacity: number = 1000) {
     this.gpuContext = gpuContext;
@@ -109,8 +113,50 @@ export class InstancedRenderer {
    * Returns the number of instances drawn.
    */
   render(entityManager: EntityManager): number {
-    const instanceCount = this.instanceBuffers.syncFromEntities(entityManager);
+    return this.drawFrame(this.syncDenseEntities(entityManager));
+  }
 
+  /**
+   * Like {@link InstancedRenderer.render}, but draws only the entities inside
+   * the camera frustum. Returns the number of instances drawn.
+   *
+   * When every entity is visible it takes the regular dirty-tracked path, so a
+   * fully on-screen, unchanged scene uploads nothing.
+   */
+  renderCulled(
+    entityManager: EntityManager,
+    cameraController: CameraController,
+    cullingManager: CullingManager,
+  ): number {
+    cameraController.syncIfDirty(this);
+    const visibleCount = cullingManager.cullEntities(entityManager, cameraController);
+    const activeCount = entityManager.getActiveCount();
+
+    if (visibleCount === activeCount) {
+      return this.drawFrame(this.syncDenseEntities(entityManager));
+    }
+
+    if (visibleCount > 0) {
+      this.holdsCulledSubset = true;
+      this.instanceBuffers.syncFromVisibleViews(cullingManager.getVisibleViews());
+    }
+    return this.drawFrame(visibleCount);
+  }
+
+  /**
+   * Dirty-tracked upload of all entities. If the buffers last held a culled
+   * subset they no longer mirror the dense arrays, so everything is re-sent.
+   */
+  private syncDenseEntities(entityManager: EntityManager): number {
+    if (this.holdsCulledSubset) {
+      entityManager.getDirtyTracker().markAllDirty(entityManager.getActiveCount());
+      this.holdsCulledSubset = false;
+    }
+    return this.instanceBuffers.syncFromEntities(entityManager);
+  }
+
+  /** Clears the screen and draws `instanceCount` instances from the bound buffers. */
+  private drawFrame(instanceCount: number): number {
     const { device } = this.gpuContext;
     const encoder = device.createCommandEncoder();
     const pass = encoder.beginRenderPass({
