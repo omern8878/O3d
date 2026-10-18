@@ -141,4 +141,83 @@ describe("InstancedRenderer", () => {
 
     assert.ok(device.buffers.every((b) => b.destroyed));
   });
+
+  describe("shape modes", () => {
+    const fragmentOf = (pipeline: GPURenderPipelineDescriptor) => pipeline.fragment!;
+    const target = (pipeline: GPURenderPipelineDescriptor) =>
+      [...fragmentOf(pipeline).targets][0] as GPUColorTargetState;
+
+    it("defaults to 'quad': shape_mode 0 and no blending", () => {
+      const { device, renderer } = createScene();
+
+      assert.equal(renderer.getShapeMode(), "quad");
+      assert.equal(device.pipelines.length, 1);
+      assert.deepEqual(fragmentOf(device.pipelines[0]!).constants, { shape_mode: 0 });
+      assert.equal(target(device.pipelines[0]!).blend, undefined);
+    });
+
+    it("'circle' sets shape_mode 1 and premultiplied-alpha blending", () => {
+      const device = createMockDevice();
+      const renderer = new InstancedRenderer(
+        createMockGpuContext(device, CLEAR_COLOR),
+        2,
+        "circle",
+      );
+
+      assert.equal(renderer.getShapeMode(), "circle");
+      assert.deepEqual(fragmentOf(device.pipelines[0]!).constants, { shape_mode: 1 });
+      assert.deepEqual(target(device.pipelines[0]!).blend, {
+        color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+      });
+    });
+
+    it("keeps the same vertex layouts and shader module for both shapes", () => {
+      const device = createMockDevice();
+      const renderer = new InstancedRenderer(createMockGpuContext(device, CLEAR_COLOR), 2);
+      renderer.setShapeMode("circle");
+
+      const [quad, circle] = device.pipelines;
+      assert.deepEqual(quad!.vertex.buffers, circle!.vertex.buffers);
+      assert.equal(device.shaderModules.length, 1);
+      assert.equal(quad!.vertex.module, circle!.vertex.module);
+    });
+
+    it("setShapeMode switches the pipeline used by the next frame and caches pipelines", () => {
+      const { manager, device, renderer } = createScene();
+      renderer.render(manager);
+      renderer.setShapeMode("circle");
+      renderer.render(manager);
+      renderer.setShapeMode("quad");
+      renderer.render(manager);
+      renderer.setShapeMode("circle");
+
+      assert.equal(device.pipelines.length, 2, "each shape builds its pipeline once");
+      const pipelinesUsed = device.passes.map(
+        (pass) => pass.calls.find((c) => c.method === "setPipeline")!.args[0],
+      );
+      assert.notEqual(pipelinesUsed[0], pipelinesUsed[1]);
+      assert.equal(pipelinesUsed[0], pipelinesUsed[2]);
+      assert.equal(renderer.getShapeMode(), "circle");
+    });
+
+    it("draws the same single instanced call in circle mode", () => {
+      const device = createMockDevice();
+      const renderer = new InstancedRenderer(
+        createMockGpuContext(device, CLEAR_COLOR),
+        2,
+        "circle",
+      );
+      const manager = new EntityManager(2);
+      manager.createEntity();
+      manager.createEntity();
+
+      renderer.render(manager);
+
+      assert.deepEqual(
+        device.passes[0]!.calls.filter((c) => c.method === "draw"),
+        [{ method: "draw", args: [6, 2, 0, 0] }],
+      );
+    });
+  });
 });

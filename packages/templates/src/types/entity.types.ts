@@ -4,6 +4,9 @@ export type EntityId = number;
 /** A 3-component vector. */
 export type Vec3 = { x: number; y: number; z: number };
 
+/** A 3-component vector as `[x, y, z]` (or `[r, g, b]` for colors). */
+export type Vec3Tuple = [number, number, number];
+
 /**
  * A color given either as a hex string (`"#RRGGBB"` or `"#RGB"`) or as a
  * normalized RGB object with each channel in `0..1`.

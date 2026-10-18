@@ -40,6 +40,11 @@ export class EntityManager {
     return id;
   }
 
+  /** Whether `id` refers to a live entity. */
+  hasEntity(id: EntityId): boolean {
+    return this.buffer.get_dense_index(id) !== undefined;
+  }
+
   /** Updates the provided fields of an entity. Unknown IDs are ignored. */
   updateEntity(id: EntityId, transform: EntityTransform): void {
     const denseIdx = this.buffer.get_dense_index(id);

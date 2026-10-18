@@ -1,16 +1,15 @@
 import { wasm_memory, type Camera } from "@engine/core/pkg/engine.js";
 import { QuadGeometry } from "../geometry/quad-geometry.ts";
-import { BYTES_PER_FLOAT, BYTES_PER_VEC3 } from "../memory/vec3-layout.ts";
 import type { CameraController } from "../scene/camera-controller.ts";
 import type { CullingManager } from "../scene/culling-manager.ts";
 import type { EntityManager } from "../scene/entity-manager.ts";
+import type { ShapeMode } from "../types/renderer.types.ts";
 import { CameraUniformBuffer } from "./camera-uniform-buffer.ts";
 import { GpuInstanceBuffers } from "./gpu-buffer-sync.ts";
 import type { GpuContext } from "./gpu-context.ts";
+import { createInstancedPipeline } from "./instanced-pipeline.ts";
 import { INSTANCED_QUAD_WGSL } from "./shaders/instanced-quad.wgsl.ts";
 
-const VEC2_STRIDE = 2 * BYTES_PER_FLOAT;
-const VEC3_STRIDE = BYTES_PER_VEC3;
 const IDENTITY_MATRIX = new Float32Array([
   1, 0, 0, 0,
   0, 1, 0, 0,
@@ -18,37 +17,33 @@ const IDENTITY_MATRIX = new Float32Array([
   0, 0, 0, 1,
 ]);
 
-/** One tightly packed vertex buffer holding a single attribute. */
-function attributeLayout(
-  shaderLocation: number,
-  format: GPUVertexFormat,
-  arrayStride: number,
-  stepMode: GPUVertexStepMode,
-): GPUVertexBufferLayout {
-  return {
-    arrayStride,
-    stepMode,
-    attributes: [{ shaderLocation, offset: 0, format }],
-  };
-}
-
 /**
- * Draws every entity as an instanced, colored quad in a single draw call.
+ * Draws every entity as an instanced, colored shape in a single draw call:
+ * a crisp quad (the default) or an anti-aliased SDF disc, see {@link ShapeMode}.
  *
  * Bind group 0 holds the camera `view_proj` uniform (identity until
- * {@link InstancedRenderer.updateCamera} is called). Vertex buffer slots: 0 = quad corners (per vertex), 1 = positions,
- * 2 = scales, 3 = colors (per instance).
+ * {@link InstancedRenderer.updateCamera} is called). Vertex buffer slots:
+ * 0 = quad corners (per vertex), 1 = positions, 2 = scales, 3 = colors (per
+ * instance).
  */
 export class InstancedRenderer {
   private readonly gpuContext: GpuContext;
   private readonly quadGeometry: QuadGeometry;
   private readonly instanceBuffers: GpuInstanceBuffers;
   private readonly cameraUniform: CameraUniformBuffer;
-  private readonly pipeline: GPURenderPipeline;
+  private readonly shaderModule: GPUShaderModule;
+  private readonly pipelineLayout: GPUPipelineLayout;
+  private readonly pipelines = new Map<ShapeMode, GPURenderPipeline>();
+  private shapeMode: ShapeMode;
+  private pipeline: GPURenderPipeline;
   /** Whether the instance buffers currently hold a culled subset, not the dense arrays. */
   private holdsCulledSubset = false;
 
-  constructor(gpuContext: GpuContext, initialCapacity: number = 1000) {
+  constructor(
+    gpuContext: GpuContext,
+    initialCapacity: number = 1000,
+    shapeMode: ShapeMode = "quad",
+  ) {
     this.gpuContext = gpuContext;
     const { device } = gpuContext;
 
@@ -68,33 +63,30 @@ export class InstancedRenderer {
     this.cameraUniform = new CameraUniformBuffer(device, cameraLayout);
     this.cameraUniform.writeRawMatrix(IDENTITY_MATRIX);
 
-    const module = device.createShaderModule({
+    this.shaderModule = device.createShaderModule({
       label: "instanced-quad-shader",
       code: INSTANCED_QUAD_WGSL,
     });
-    this.pipeline = device.createRenderPipeline({
-      label: "instanced-quad-pipeline",
-      layout: device.createPipelineLayout({
-        label: "instanced-quad-pipeline-layout",
-        bindGroupLayouts: [cameraLayout],
-      }),
-      vertex: {
-        module,
-        entryPoint: "vs_main",
-        buffers: [
-          attributeLayout(0, "float32x2", VEC2_STRIDE, "vertex"),
-          attributeLayout(1, "float32x3", VEC3_STRIDE, "instance"),
-          attributeLayout(2, "float32x3", VEC3_STRIDE, "instance"),
-          attributeLayout(3, "float32x3", VEC3_STRIDE, "instance"),
-        ],
-      },
-      fragment: {
-        module,
-        entryPoint: "fs_main",
-        targets: [{ format: gpuContext.format }],
-      },
-      primitive: { topology: "triangle-list", cullMode: "none" },
+    this.pipelineLayout = device.createPipelineLayout({
+      label: "instanced-quad-pipeline-layout",
+      bindGroupLayouts: [cameraLayout],
     });
+    this.shapeMode = shapeMode;
+    this.pipeline = this.pipelineFor(shapeMode);
+  }
+
+  /** The shape each instance is currently drawn as. */
+  getShapeMode(): ShapeMode {
+    return this.shapeMode;
+  }
+
+  /**
+   * Switches how instances are drawn from the next frame on. Each shape's
+   * pipeline is built once, on first use, and reused afterwards.
+   */
+  setShapeMode(shapeMode: ShapeMode): void {
+    this.shapeMode = shapeMode;
+    this.pipeline = this.pipelineFor(shapeMode);
   }
 
   /**
@@ -153,6 +145,21 @@ export class InstancedRenderer {
       this.holdsCulledSubset = false;
     }
     return this.instanceBuffers.syncFromEntities(entityManager);
+  }
+
+  private pipelineFor(shapeMode: ShapeMode): GPURenderPipeline {
+    let pipeline = this.pipelines.get(shapeMode);
+    if (!pipeline) {
+      pipeline = createInstancedPipeline({
+        device: this.gpuContext.device,
+        shaderModule: this.shaderModule,
+        pipelineLayout: this.pipelineLayout,
+        colorFormat: this.gpuContext.format,
+        shapeMode,
+      });
+      this.pipelines.set(shapeMode, pipeline);
+    }
+    return pipeline;
   }
 
   /** Clears the screen and draws `instanceCount` instances from the bound buffers. */
