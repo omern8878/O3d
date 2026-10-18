@@ -1,234 +1,202 @@
 # High-Performance Browser Rendering Engine (Rust, Wasm, WebGPU)
 
-> A zero-copy, high-throughput 2D/3D instanced rendering engine: entity data lives in Rust-owned Wasm linear memory, JavaScript aliases it with typed-array views, only modified byte ranges reach the GPU, and everything visible is drawn in a single instanced draw call.
+> A zero-copy, high-throughput 2D/3D instanced rendering engine. Entity data lives in Rust-owned WebAssembly memory, JavaScript reads it through aliased typed arrays, only modified byte ranges reach the GPU, and everything visible is drawn in a single instanced draw call.
 
 ```text
-Rust ECS (Wasm memory) ──zero-copy views──▶ DirtyTracker ──sub-slice writeBuffer──▶ GPU instance buffers ──▶ 1 draw call
-        ▲                                                                                  ▲
- Camera + Frustum culling (Rust)  ────────── 64-byte view_proj uniform, only when it changes
+Rust ECS in Wasm memory ──zero-copy views──▶ dirty-range tracking ──sub-slice uploads──▶ GPU instance buffers ──▶ 1 draw call
+          ▲                                                                                      ▲
+ Camera + frustum culling (Rust) ───────────── 64-byte view-projection uniform, sent only when it changes
 ```
+
+**At a glance**
+
+| Guarantee | What it means |
+|-----------|---------------|
+| Zero-copy | Typed arrays alias Wasm linear memory; entity data is never serialized or duplicated on the JS side. |
+| O(1) ECS | Sparse-set indexing with Structure-of-Arrays storage: constant-time create, remove and lookup. |
+| Idle = 0 bytes | Unchanged scenes upload nothing; edits upload only the touched slice. |
+| One draw call | All entities render as instanced quads in a single `draw`. |
+| Culled on the CPU | Gribb-Hartmann frustum culling with stream compaction sends only visible instances. |
+| Read-only by type | Consumers receive immutable views; the engine owns all writes. |
+| Panic-free boundary | Invalid input from JavaScript cannot crash the Wasm module. |
 
 ---
 
 ## 🧠 AI & Architecture Blueprint (LLM-Optimized Context)
 
-Read this section before editing anything. It is the contract of the codebase.
+Read this before changing or extending the engine. These are the contracts the design depends on.
 
 ### Hard Invariants (Never violate these)
 
 | # | Invariant | Details |
 |---|-----------|---------|
-| 1 | **Matrix Order** | Strict **column-major** `[f32; 16]`: element `(row, col)` is at `m[col * 4 + row]`; translation lives at indices `12..15`. Matrices act on column vectors: `clip = projection * view * model * point`. Never transpose "to fix" a bug; fix the producer. |
-| 2 | **Depth Range** | WebGPU **zero-to-one, right-handed** clip depth `[0.0, 1.0]` (`*_rh_zo`), never OpenGL's `[-1, 1]`. The camera looks down its local `-Z`. Frustum planes follow it: Near = `row2`, Far = `row3 - row2`. |
-| 3 | **Memory Model** | **Zero-copy** `Float32Array` views alias Wasm linear memory (`new Float32Array(wasm_memory().buffer, ptr, len)`). A view is invalidated when the Rust `Vec` reallocates (capacity change) **or** Wasm memory grows (`memory.grow` detaches the old `ArrayBuffer`). `WasmBufferView` re-syncs automatically on both; never cache a raw view across calls that can allocate. |
-| 4 | **Encapsulation** | External consumers only receive `ReadonlyFloat32Array` / `ReadonlyRawEntityViews` / `VisibleViews`. All writes go through `EntityManager` so `DirtyTracker` stays correct. Raw Wasm handles are `@internal` and are not exported from the barrel. |
+| 1 | **Matrix order** | Strict **column-major** `[f32; 16]`: element `(row, col)` lives at `m[col * 4 + row]` and translation occupies the last column. Matrices act on column vectors: `clip = projection * view * model * point`. Never transpose to "fix" a bug; fix the producer. |
+| 2 | **Depth range** | WebGPU **zero-to-one, right-handed** clip depth `[0.0, 1.0]`, never OpenGL's `[-1, 1]`. The camera looks down its local `-Z`, and frustum extraction uses the matching near/far plane formulas. |
+| 3 | **Memory model** | **Zero-copy** `Float32Array` views alias Wasm linear memory. A view dies when the Rust arrays reallocate **or** when Wasm memory grows (`memory.grow` detaches the old `ArrayBuffer`). The engine re-syncs views automatically on both events; never hold a raw view across a call that can allocate. |
+| 4 | **Encapsulation** | Consumers only receive `ReadonlyFloat32Array`-based views. Every write goes through the public managers so change tracking stays correct. Raw Wasm handles are marked `@internal` and are not part of the public surface. |
 
-Additional rules that follow from the above:
+Corollaries:
 
-- **Dirty tracking is single-consumer.** `GpuInstanceBuffers` is the only code that reads and clears the `DirtyTracker`.
-- **Entity identity:** `EntityId` is stable for the life of an entity; the *dense index* changes on swap-and-pop removal. Never store dense indices across frames.
-- **Culled frames break the dense mirror.** After `syncFromVisibleViews` the GPU buffers hold a compacted subset, so `InstancedRenderer` calls `markAllDirty` before returning to the dense path.
-- **Wasm boundary is hostile input.** Every `#[wasm_bindgen]` method must tolerate `NaN`, infinities, zero, out-of-range IDs and degenerate geometry without panicking.
+- **One consumer clears dirty state.** Only the GPU upload step reads and resets change tracking.
+- **IDs are stable, indices are not.** An `EntityId` is valid for the entity's whole life; its dense storage index changes when other entities are removed. Never keep dense indices across frames.
+- **Culled frames break the dense mirror.** After drawing a compacted subset, the GPU no longer mirrors the full entity arrays, so the renderer re-marks everything dirty before returning to the full path.
+- **The Wasm boundary is hostile input.** Every exported method must tolerate `NaN`, infinities, zero, stale IDs and degenerate geometry without panicking.
 
-### Project Rules (`.cursorrules`, strictly enforced)
+### Design Principles
 
-- **SRP:** one primary struct/class per file; every module has one reason to change.
-- **Barrels only:** `lib.rs`, `mod.rs` and `index.ts` contain only `mod` / `pub use` / `export ... from`. No logic, data, or FFI bodies. `main.ts` only wires modules.
-- **Rust tests live in sibling files:** `<module>_tests.rs`, linked at the bottom of the implementation file with exactly `#[cfg(test)] #[path = "<module>_tests.rs"] mod tests;`. No inline test bodies.
-- **TypeScript tests** sit next to the code as `<name>.test.ts`; shared doubles go in `testing/` and are never exported from `index.ts`.
-- **Separate data, math and bindings:** keep domain logic pure (no `#[wasm_bindgen]`) and wrap it in a thin binding layer. No magic numbers; document every public item.
-- **Extend, don't grow:** add new types/modules rather than flags and special cases (Open/Closed).
+- **Single responsibility:** storage, math, change tracking, GPU upload and facades are separate concerns with one reason to change each.
+- **Pure core, thin bindings:** the math and ECS logic is plain Rust; the Wasm layer only translates types.
+- **Open/closed:** new capabilities arrive as new types, not as flags on existing ones.
+- **Tested at every boundary:** Rust unit tests, TypeScript unit tests, and full-stack tests on the real Wasm module against a mock WebGPU device.
 
-### Module Map & SRP Breakdown
+### Per-Frame Data Flow
 
-```text
-packages/
-├── engine/                        Rust crate -> Wasm (wasm-pack --target web)
-│   └── src/
-│       ├── lib.rs                 barrel only
-│       ├── init.rs                init_engine() entrypoint
-│       ├── memory.rs              wasm_memory() accessor
-│       ├── ecs/
-│       │   ├── sparse_set.rs      id <-> dense-index bookkeeping (pure, no Wasm types)
-│       │   ├── entity_buffer.rs   SoA positions / scales / colors, Wasm-facing
-│       │   └── culling_buffer.rs  stream-compacted visible entities, Wasm-facing
-│       └── math/
-│           ├── vec3.rs            add / sub / dot / cross / normalize
-│           ├── mat4.rs            column-major Mat4, ortho / perspective / look_at (_rh_zo)
-│           ├── spherical.rs       orbit-camera spherical coordinates
-│           ├── camera.rs          Camera: owns view_proj, Ortho2D / Perspective3D
-│           ├── frustum.rs         Gribb-Hartmann planes + sphere tests
-│           └── input_guard.rs     finite / range validation of untrusted f32s
-└── templates/  (@engine/templates)  TypeScript facade
-    └── src/
-        ├── index.ts               public barrel
-        ├── scene/                 EntityManager, CameraController, CullingManager
-        ├── memory/                dirty-tracker.ts, wasm-buffer-view.ts, vec3-layout.ts
-        ├── renderer/              GpuContext, InstancedRenderer, GpuInstanceBuffers,
-        │                          CameraUniformBuffer, shaders/ (WGSL)
-        ├── geometry/              QuadGeometry (static unit quad)
-        ├── types/                 public types incl. readonly-buffer.types.ts
-        ├── utils/                 color parsing
-        ├── testing/               mock WebGPU device (never exported)
-        └── e2e/                   full-stack tests on real Wasm + mock GPU
-apps/playground/                   Vite demo + memory diagnostics
-```
-
-| Path | Responsibility (single reason to change) |
-|------|------------------------------------------|
-| `packages/engine/src/ecs/` | **Sparse Set** (`sparse_set.rs`) and **SoA entity buffers** (`entity_buffer.rs`) giving O(1) allocate / remove / lookup; plus the culling output buffer (`culling_buffer.rs`). |
-| `packages/engine/src/math/` | **Pure Rust linear algebra** (`mat4.rs`, `vec3.rs`, `camera.rs`, `frustum.rs`) with no JS types. Only `camera.rs` carries a thin Wasm binding. |
-| `packages/templates/src/memory/` | **Dirty range tracking** (`dirty-tracker.ts`) and **zero-copy buffer views** (`wasm-buffer-view.ts`). Pure state and view lifecycle; knows nothing about the GPU. |
-| `packages/templates/src/renderer/` | **WebGPU pipeline**, camera **uniform buffer**, GPU instance buffers and **instanced rendering**. The only layer that touches `GPUDevice`. |
-| `packages/templates/src/scene/` | Ergonomic facades over Wasm: `EntityManager` (stable IDs + dirty marking), `CameraController` (dirty flag), `CullingManager` (frustum culling + visible views). |
-
-### Data Flow per Frame
-
-1. Mutations: `EntityManager.updateEntity` writes through the zero-copy view and marks a dense-index range dirty per channel.
-2. `CameraController.syncIfDirty` uploads the 64-byte `view_proj` uniform only if the camera changed.
-3. (Optional) `CullingManager.cullEntities` runs Gribb-Hartmann culling in Wasm and compacts the visible set.
-4. `GpuInstanceBuffers` uploads only dirty sub-slices (or the compacted subset), then clears the tracker.
-5. `InstancedRenderer` records one render pass with `pass.draw(6, instanceCount, 0, 0)`.
-
-### Where to Make Common Changes
-
-| Task | Edit | Do not |
-|------|------|--------|
-| New per-entity attribute | `entity_buffer.rs` (+ `_tests.rs`), `wasm-buffer-view.ts`, `dirty-tracker.ts` channel, `gpu-buffer-sync.ts`, shader | Add it to `lib.rs` or `index.ts` bodies |
-| New math routine | New file in `math/` + sibling `_tests.rs` + `mod.rs` line | Put `#[wasm_bindgen]` in pure math files |
-| New public Wasm method | Validate inputs (see `input_guard.rs`) and add degenerate-input tests | Allow `panic!`, `unwrap` or unchecked indexing on JS input |
-| Expose new data to consumers | Return a `Readonly*` type | Return a mutable `Float32Array` |
+1. **Mutate:** `updateEntity` writes straight into Wasm memory and widens a dirty interval per channel.
+2. **Camera:** the 64-byte view-projection uniform is uploaded only if the camera changed.
+3. **Cull (optional):** Wasm tests every entity against the frustum and compacts the visible ones.
+4. **Upload:** only dirty sub-slices (or the compacted visible set) are written to GPU buffers, then dirty state is cleared.
+5. **Draw:** one render pass, one instanced draw with the instance count.
 
 ---
 
 ## Core Architectural Strengths
 
 ### O(1) Entity Component System
-A **sparse set** maps stable entity IDs to dense indices. Components are stored as **Structure-of-Arrays** (`positions`, `scales`, `colors`, 3 `f32` per entity) so the GPU reads them as tightly packed vertex buffers.
+A **sparse set** maps stable entity IDs to dense indices, and components are stored as **Structure-of-Arrays** (positions, scales and colors, three `f32` each). The arrays are tightly packed, so the GPU consumes them directly as vertex buffers and the CPU iterates them cache-friendly.
 
-- `allocate_entity`: pops a recycled ID or appends; O(1) amortized (capacity doubles).
-- `remove_entity`: **swap-and-pop** moves the last entity into the hole, keeping arrays gap-free; O(1). It returns the overwritten dense index (or `-1`) so the caller marks exactly that slot dirty.
-- `get_dense_index`: O(1) array lookup; invalid or stale IDs return `undefined`/`None`.
+- **Create:** reuses a freed ID or appends; capacity doubles when full, so cost is O(1) amortized.
+- **Remove:** **swap-and-pop** moves the last entity into the vacated slot, keeping arrays gap-free in O(1). The overwritten slot is reported so exactly that slot is re-uploaded.
+- **Lookup:** a direct array read; stale or invalid IDs resolve to "not found" instead of failing.
 
 ### Zero-Copy Interop
-JavaScript never copies entity data. `WasmBufferView` builds `Float32Array` views directly over Wasm memory at the `*_ptr()` offsets and rebuilds them whenever the Rust arrays reallocate or `memory.grow` detaches the underlying `ArrayBuffer`. `CullingManager.getVisibleViews()` rebuilds its views on every call for the same reason.
+JavaScript never copies entity data. Typed-array views are built directly over Wasm memory and rebuilt automatically whenever the underlying arrays move (buffer growth) or are detached (`memory.grow`). Culling results are exposed the same way, with views rebuilt on every access.
 
 ### Dirty Sub-Slice Uploads (0 bytes on idle)
-`DirtyTracker` keeps one inclusive `[min, max]` dense-index interval per channel (`position`, `scale`, `color`). `GpuInstanceBuffers.syncFromEntities` issues **one `queue.writeBuffer` per dirty channel, covering only that interval**.
+Change tracking keeps one inclusive `[min, max]` interval of dense indices per channel (position, scale, color). Each frame issues **at most one `writeBuffer` per dirty channel, covering only that interval**.
 
-- Nothing changed: **0 `writeBuffer` calls, 0 bytes** for instance data, and the camera uniform is skipped too unless the camera moved.
-- One entity edited: a single 12-byte write on the changed channel.
-- Trade-off (by design): one interval per channel means clean entities between two dirty ones are re-sent, in exchange for a single contiguous write.
+- **Nothing changed:** zero instance uploads, zero bytes. The camera uniform is skipped too unless the camera moved.
+- **One entity edited:** a single 12-byte write on the channel that changed.
+- **Deliberate trade-off:** one interval per channel means clean entities between two dirty ones are re-sent, in exchange for a single contiguous write.
 
 ### Gribb-Hartmann Frustum Culling with CPU-Side Stream Compaction
-`Frustum::from_view_proj` extracts six normalized planes directly from the column-major `view_proj` rows, adapted to the `[0, 1]` depth range (Near = `r2`, Far = `r3 - r2`). Each entity is tested as a bounding sphere (radius = half the diagonal of its scale vector).
+Six normalized frustum planes are extracted directly from the column-major view-projection matrix (Gribb-Hartmann), adapted to WebGPU's `[0, 1]` depth range. Each entity is tested as a bounding sphere whose radius is half the diagonal of its scale.
 
-`CullingBuffer::cull` then **stream-compacts**: visible entities are copied into packed `visible_positions` / `visible_scales` / `visible_colors` (plus `visible_ids`), reusing allocated capacity every frame. The GPU receives only the visible instances and the draw call is `pass.draw(6, visibleCount, 0, 0)` (skipped when 0).
+**Stream compaction** then copies only the visible entities into packed arrays, reusing allocated capacity every frame. The GPU receives just those instances and the draw call carries the visible count (the draw is skipped when nothing is visible).
 
-`InstancedRenderer.renderCulled` picks the cheapest path:
+| Situation | Behavior | Instance upload |
+|-----------|----------|-----------------|
+| Everything visible | Dirty-tracked full path | Dirty sub-slices only (0 bytes if unchanged) |
+| Partially visible | Compacted visible set | The visible set each frame (camera uniform still skipped if unchanged) |
+| Nothing visible | Clear the screen only | None; draw skipped |
 
-| Situation | Path | Instance upload |
-|-----------|------|-----------------|
-| All entities visible | dirty-tracked `syncFromEntities` | dirty sub-slices only (0 bytes if unchanged) |
-| Some visible | `syncFromVisibleViews` | the compacted visible set each frame (camera uniform still skipped if unchanged) |
-| None visible | clear only | none, draw skipped |
-
-When the view returns to "all visible" the renderer marks everything dirty once to resynchronize the GPU with the dense arrays.
+When the view returns to "everything visible", all entities are marked dirty once so the GPU resynchronizes with the full arrays.
 
 ---
 
 ## Memory Safety & Security
 
-### Immutability Enforcement (TypeScript)
-`packages/templates/src/types/readonly-buffer.types.ts` defines compile-time immutable views:
+### Readonly Encapsulation (compile time)
+Zero-copy views expose live engine memory, so consumers get **compile-time immutable** types:
 
-- `ReadonlyFloat32Array` / `ReadonlyUint32Array`: remove `set`, `fill`, `copyWithin`, `reverse`, `sort`, make the numeric index signature `readonly`, and narrow `subarray()` so slices stay read-only.
-- `ReadonlyRawEntityViews`: `{ positions, scales, colors }`, returned by `EntityManager.getRawViews()`.
-- `VisibleViews` (from `CullingManager.getVisibleViews()`) uses the same read-only types.
+- `ReadonlyFloat32Array` and `ReadonlyUint32Array` remove `set`, `fill`, `copyWithin`, `reverse` and `sort`, make element access read-only, and keep sub-views (`subarray`) read-only too.
+- `ReadonlyRawEntityViews` groups the position, scale and color views returned by the entity manager.
+- Culling results are exposed through the same read-only types.
 
 ```ts
 const { positions } = entities.getRawViews();
+
 positions[0] = 1;          // TS error: index signature only permits reading
 positions.set([1, 2, 3]);  // TS error: 'set' does not exist
 ```
 
-The read-only cast back to `Float32Array` happens in exactly one place, a private helper that wraps `device.queue.writeBuffer` (WebGPU only reads the source). Raw accessors (`getRawWasmBuffer`, `getDirtyTracker`, `getRawWasmCamera`) are marked `@internal`, and a barrel test asserts that `wasm_memory`, `EntityBuffer`, `Camera`, `CullingBuffer` and similar low-level items are not exported.
+The only place a view is cast back to a writable array is the final GPU `writeBuffer` call, which only reads from it. Low-level Wasm handles are never exported from the package entry point.
 
-> Immutability is enforced by the type system, not at runtime. Plain JavaScript can still write to the underlying memory.
+> Immutability is enforced by the type system, not at runtime. Plain JavaScript can still write to the underlying memory, so treat the views as read-only.
 
-### Wasm Boundary Input Sanitization (Rust)
-Every exported method is written so no JS call sequence can hit a `panic!`:
+### Wasm Boundary Input Sanitization (runtime)
+Everything crossing from JavaScript into Rust is validated so no call sequence can trigger a Wasm `panic!`:
 
-- **Capacity:** `EntityBuffer::new` and `CullingBuffer::new` clamp to `[1, 4_194_304]`; growth math saturates.
-- **Entity IDs:** out-of-range, stale and double-removed IDs are ignored (`remove_entity` returns `-1`, `get_dense_index` returns `None`).
-- **Camera:** non-finite or out-of-range positions, targets, pans, orbit deltas and zoom factors are ignored (state is kept). Aspect ratios outside `[1e-4, 1e4]` are ignored (constructor falls back to `1.0`). Ortho zoom is clamped. `math/input_guard.rs` holds the checks.
-- **Degenerate geometry:** `look_at_rh` returns a valid orthonormal basis for `eye == target` or an `up` that is zero or parallel to the view direction; `orbit_3d` and perspective zoom no-op when the eye coincides with the target.
-- Every case above has a regression test in the sibling `*_tests.rs` files.
+- **Capacities** are clamped to a safe range (minimum 1); growth arithmetic saturates instead of overflowing.
+- **Entity IDs** that are out of range, stale or already removed are ignored.
+- **Camera inputs** that are `NaN`, infinite or out of range are ignored and the previous state is kept. Aspect ratios outside `[1e-4, 1e4]` are rejected (the constructor falls back to `1.0`), and zoom values are clamped.
+- **Degenerate geometry** (eye on the target, or an up vector that is zero or parallel to the view direction) still yields a valid, finite, orthonormal view matrix. Orbit and perspective zoom do nothing when the eye coincides with the target.
+- Each of these cases is covered by regression tests.
 
-> Known limit: genuine Wasm memory exhaustion traps rather than throwing a catchable error.
+> Known limit: genuine Wasm memory exhaustion traps instead of raising a catchable error.
 
 ---
 
 ## Code Snippets & Usage Guide
 
-### Prerequisites
+### Setup
 
 ```bash
 npm install
-npm run build:wasm                    # wasm-pack build --target web  (needs wasm-pack)
-npm run dev -w playground             # Vite demo (WebGPU-capable browser required)
+npm run build:wasm      # compiles the Rust engine to WebAssembly (requires wasm-pack)
 ```
 
-### Initialize and create entities (`EntityManager`)
+Rendering requires a browser with WebGPU (recent Chrome, Edge or Safari) served over HTTPS or `localhost`.
+
+### Create and update entities with `EntityManager`
 
 ```ts
 import init from "@engine/core/pkg/engine.js";
 import { EntityManager } from "@engine/templates";
 
-await init(); // load Wasm once, before constructing any manager
+await init(); // load the Wasm module once, before creating any manager
 
 const entities = new EntityManager(1000); // initial capacity; grows automatically
 
 const id = entities.createEntity({
   position: { x: 10, y: 20, z: 0 },
   scale: { x: 12, y: 12, z: 1 },
-  color: "#ff8800",                   // or { r: 1, g: 0.5, b: 0 } (0..1)
+  color: "#ff8800", // or { r: 1, g: 0.5, b: 0 } with channels in 0..1
 });
 
 entities.updateEntity(id, { position: { x: 15 } }); // partial update, tracked as dirty
 entities.removeEntity(id);                          // unknown IDs are ignored
 
 console.log(entities.getActiveCount());
-const { positions } = entities.getRawViews();       // ReadonlyFloat32Array (read-only)
+const { positions } = entities.getRawViews(); // read-only zero-copy view
 ```
 
-### Control the camera (`CameraController`)
+### Control the view with `CameraController`
 
 ```ts
 import { CameraController } from "@engine/templates";
 
+// 2D orthographic camera
 const camera = new CameraController({ mode: "2d", orthoHalfHeight: 100 });
-camera.resize(canvas.width, canvas.height);   // updates the aspect ratio
-camera.panByPixels(dx, dy, canvas.height);    // 2D drag
-camera.zoom(0.9);                             // < 1 zooms in, > 1 zooms out
+camera.resize(canvas.width, canvas.height);  // keeps the aspect ratio correct
+camera.panByPixels(dx, dy, canvas.height);   // drag to pan
+camera.zoom(0.9);                            // < 1 zooms in, > 1 zooms out
 
+// 3D perspective camera with orbit controls
 const orbit = new CameraController({
   mode: "3d",
   position: { x: 0, y: 5, z: 20 },
   target: { x: 0, y: 0, z: 0 },
 });
-orbit.orbit(0.02, -0.01);                     // azimuth, elevation (radians)
+orbit.orbit(0.02, -0.01); // azimuth, elevation (radians)
 ```
 
-### Render (`InstancedRenderer`)
+### Render with `InstancedRenderer`
 
 ```ts
 import {
-  CameraController, CullingManager, EntityManager, GpuContext, InstancedRenderer,
+  CameraController,
+  CullingManager,
+  EntityManager,
+  GpuContext,
+  InstancedRenderer,
 } from "@engine/templates";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#render-canvas")!;
-const gpu = await GpuContext.create({ canvas, clearColor: { r: 0.05, g: 0.05, b: 0.1, a: 1 } });
+const gpu = await GpuContext.create({
+  canvas,
+  clearColor: { r: 0.05, g: 0.05, b: 0.1, a: 1 },
+});
+
 const renderer = new InstancedRenderer(gpu, 1000);
 const culling = new CullingManager(1000);
 
@@ -237,10 +205,10 @@ function frame() {
   camera.resize(canvas.width, canvas.height);
 
   // Option A: draw everything (dirty-tracked uploads, 0 bytes when idle)
-  camera.syncIfDirty(renderer);                       // 64-byte uniform only if changed
+  camera.syncIfDirty(renderer); // 64-byte uniform, only if the camera changed
   renderer.render(entities);
 
-  // Option B: draw only what is inside the frustum (syncs the camera itself)
+  // Option B: draw only what is inside the frustum (also syncs the camera)
   // const drawn = renderer.renderCulled(entities, camera, culling);
 
   requestAnimationFrame(frame);
@@ -248,27 +216,25 @@ function frame() {
 requestAnimationFrame(frame);
 ```
 
-Use either `render` or `renderCulled` per frame, not both.
+Use either `render` or `renderCulled` in a frame, not both. Both return the number of instances drawn.
 
-### Testing
+### Verify
 
 ```bash
-cd packages/engine && cargo fmt --check && cargo test && cargo clippy --all-targets -- -D warnings
-npm run build:wasm
-npx tsc --noEmit -p packages/templates
-npm test -w @engine/templates         # unit + e2e (real Wasm, mock WebGPU device)
+cargo fmt --check && cargo test && cargo clippy --all-targets -- -D warnings   # Rust (run in the engine crate)
+npm test -w @engine/templates                                                  # TypeScript unit + full-stack tests
 ```
 
 ---
 
 ## Roadmap
 
-- [x] **Stage 1 to 4:** Wasm ECS, zero-copy TypeScript layer, WebGPU instanced renderer, dirty range tracking, 2D/3D camera, Gribb-Hartmann frustum culling with stream compaction, memory-safety hardening.
-- [ ] **Stage 5: Raycasting & Spatial Picking:** screen-to-world rays from the inverse `view_proj`, ray-vs-entity tests in Wasm, spatial acceleration structure, and an `EntityManager`-level picking API that returns stable `EntityId`s.
-- [ ] **Stage 6: SDF Shaders & Benchmarks:** signed-distance-field shapes and text/outline rendering in WGSL, plus a reproducible benchmark suite (entity count, upload bytes per frame, culling cost, frame time).
+- [x] **Stages 1 to 4:** Wasm ECS, zero-copy TypeScript layer, WebGPU instanced renderer, dirty range tracking, 2D/3D camera, Gribb-Hartmann frustum culling with stream compaction, memory-safety hardening.
+- [ ] **Stage 5: Raycasting & Spatial Picking:** screen-to-world rays from the inverse view-projection, ray-vs-entity tests in Wasm, a spatial acceleration structure, and a picking API that returns stable `EntityId`s.
+- [ ] **Stage 6: SDF Shaders & Benchmarks:** signed-distance-field shapes and outlines in WGSL, plus a reproducible benchmark suite (entity count, upload bytes per frame, culling cost, frame time).
 
 ---
 
 ## License
 
-See [LICENSE](./LICENSE).
+MIT
