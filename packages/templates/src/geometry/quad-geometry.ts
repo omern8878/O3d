@@ -1,3 +1,5 @@
+import { bufferUsage } from "../renderer/gpu-flags.ts";
+
 const FLOATS_PER_VERTEX = 2;
 
 /**
@@ -23,7 +25,7 @@ export class QuadGeometry {
     this.vertexBuffer = device.createBuffer({
       label: "quad-vertices",
       size: QUAD_VERTICES.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      usage: bufferUsage().VERTEX | bufferUsage().COPY_DST,
     });
     device.queue.writeBuffer(this.vertexBuffer, 0, QUAD_VERTICES);
   }

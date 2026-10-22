@@ -1,9 +1,12 @@
+export { default as initEngine } from "@engine/core/pkg/engine.js";
 export { CullingManager } from "./scene/culling-manager.ts";
 export { CameraController } from "./scene/camera-controller.ts";
 export { EntityManager } from "./scene/entity-manager.ts";
 export { PickingController } from "./scene/picking-controller.ts";
 export { SceneTemplate } from "./templates/scene-template.ts";
+export { BenchmarkSuite } from "./benchmark/benchmark-suite.ts";
 export { GpuContext } from "./renderer/gpu-context.ts";
+export { createHeadlessGpuContext } from "./renderer/headless-gpu-context.ts";
 export { InstancedRenderer } from "./renderer/instanced-renderer.ts";
 export { INSTANCED_QUAD_WGSL } from "./renderer/shaders/instanced-quad.wgsl.ts";
 export { CameraUniformBuffer } from "./renderer/camera-uniform-buffer.ts";
@@ -29,3 +32,11 @@ export type {
   SceneTemplateConfig,
 } from "./types/scene-template.types.ts";
 export type { ClearColor, RendererConfig, ShapeMode } from "./types/renderer.types.ts";
+export type { FrameStats, InstanceUpload } from "./types/frame-stats.types.ts";
+export type {
+  BenchmarkOptions,
+  BenchmarkReport,
+  EngineMetrics,
+  WorkloadId,
+  WorkloadResult,
+} from "./types/benchmark.types.ts";

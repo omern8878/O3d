@@ -1,8 +1,21 @@
 {
-  "name": "wasm-rendering-engine",
+  "name": "o3d",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "build:wasm": "cd packages/engine && wasm-pack build --target web"
+    "build:wasm": "cd packages/engine && wasm-pack build --target web",
+    "build": "npm run build:wasm && npm run build -w @engine/templates && npm run build -w playground",
+    "test": "npm run test --workspaces --if-present",
+    "dev": "npm run dev -w playground",
+    "preview": "npm run preview -w playground",
+    "capture:media": "node scripts/capture-media.mjs"
+  },
+  "devDependencies": {
+    "gifenc": "^1.0.3",
+    "playwright": "^1.56.1",
+    "pngjs": "^7.0.0"
   }
 }

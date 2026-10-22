@@ -5,8 +5,10 @@ import { PickingController } from "../scene/picking-controller.ts";
 import { GpuContext } from "../renderer/gpu-context.ts";
 import { InstancedRenderer } from "../renderer/instanced-renderer.ts";
 import type { EntityId, Vec3Tuple } from "../types/entity.types.ts";
+import type { FrameStats } from "../types/frame-stats.types.ts";
 import type { ViewportRect } from "../types/picking.types.ts";
-import type { RendererConfig } from "../types/renderer.types.ts";
+import type { ReadonlyRawEntityViews } from "../types/readonly-buffer.types.ts";
+import type { RendererConfig, ShapeMode } from "../types/renderer.types.ts";
 import type {
   SceneCameraMode,
   SceneTemplateConfig,
@@ -38,6 +40,7 @@ export class SceneTemplate {
   private readonly renderer: InstancedRenderer;
   /** Present only when culling is enabled. */
   private readonly culling: CullingManager | null;
+  private lastDrawnCount = 0;
 
   constructor(gpuContext: GpuContext, config: SceneTemplateConfig = {}) {
     const capacity = config.initialCapacity ?? DEFAULT_INITIAL_CAPACITY;
@@ -135,10 +138,53 @@ export class SceneTemplate {
    */
   renderFrame(): number {
     if (this.culling) {
-      return this.renderer.renderCulled(this.entities, this.camera, this.culling);
+      this.lastDrawnCount = this.renderer.renderCulled(
+        this.entities,
+        this.camera,
+        this.culling,
+      );
+    } else {
+      this.camera.syncIfDirty(this.renderer);
+      this.lastDrawnCount = this.renderer.render(this.entities);
     }
-    this.camera.syncIfDirty(this.renderer);
-    return this.renderer.render(this.entities);
+    return this.lastDrawnCount;
+  }
+
+  /**
+   * What the last {@link SceneTemplate.renderFrame} drew and uploaded. An
+   * unchanged scene reports `uploadedBytes: 0`; editing a few nodes reports
+   * just their slice.
+   */
+  getFrameStats(): FrameStats {
+    const uploads = this.renderer.getLastFrameUploads();
+    return {
+      drawnCount: this.lastDrawnCount,
+      totalCount: this.entities.getActiveCount(),
+      uploadedBytes: uploads.reduce((sum, upload) => sum + upload.byteLength, 0),
+      uploads,
+    };
+  }
+
+  /** Switches the camera projection, keeping its position and target. */
+  setCameraMode(mode: SceneCameraMode): void {
+    this.camera.setMode(CAMERA_MODES[mode]);
+  }
+
+  /** Switches how nodes are drawn from the next frame on. */
+  setShapeMode(shapeMode: ShapeMode): void {
+    this.renderer.setShapeMode(shapeMode);
+  }
+
+  getShapeMode(): ShapeMode {
+    return this.renderer.getShapeMode();
+  }
+
+  /**
+   * Read-only zero-copy views of every node's position, scale and color, in
+   * insertion order until nodes are removed. Valid until the next `addNode`.
+   */
+  getNodeViews(): ReadonlyRawEntityViews {
+    return this.entities.getRawViews();
   }
 
   /** The camera, for pan / zoom / orbit / resize. */

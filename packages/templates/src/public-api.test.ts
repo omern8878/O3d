@@ -5,6 +5,7 @@ import * as api from "./index.ts";
 describe("public API barrel", () => {
   it("exports exactly the intended runtime surface", () => {
     assert.deepEqual(Object.keys(api).sort(), [
+      "BenchmarkSuite",
       "CameraController",
       "CameraUniformBuffer",
       "CullingManager",
@@ -16,6 +17,8 @@ describe("public API barrel", () => {
       "PickingController",
       "QuadGeometry",
       "SceneTemplate",
+      "createHeadlessGpuContext",
+      "initEngine",
     ]);
   });
 

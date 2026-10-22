@@ -241,4 +241,62 @@ describe("SceneTemplate", () => {
 
     assert.ok(device.buffers.every((buffer) => buffer.destroyed));
   });
+
+  describe("frame stats and runtime switches", () => {
+    it("reports 0 uploaded bytes for an unchanged frame and the exact slice after an edit", () => {
+      const { scene } = createScene();
+      const ids = [0, 1, 2, 3].map((i) => scene.addNode([i, 0, 0], [1, 1, 1], [1, 0, 0]));
+
+      scene.renderFrame();
+      assert.equal(scene.getFrameStats().uploadedBytes, 4 * 3 * 12);
+
+      scene.renderFrame();
+      assert.deepEqual(scene.getFrameStats(), {
+        drawnCount: 4,
+        totalCount: 4,
+        uploadedBytes: 0,
+        uploads: [],
+      });
+
+      scene.updateNodePosition(ids[1]!, [9, 9, 0]);
+      scene.updateNodePosition(ids[2]!, [8, 8, 0]);
+      scene.renderFrame();
+      const stats = scene.getFrameStats();
+      assert.equal(stats.uploadedBytes, 2 * 12);
+      assert.deepEqual(stats.uploads, [{ channel: "position", byteOffset: 12, byteLength: 24 }]);
+    });
+
+    it("counts drawn and total nodes separately when culling hides some", () => {
+      const { scene } = createScene();
+      scene.addNode([0, 0, 0], [10, 10, 1], [1, 0, 0]);
+      scene.addNode([5000, 0, 0], [10, 10, 1], [1, 0, 0]);
+
+      scene.renderFrame();
+
+      const { drawnCount, totalCount } = scene.getFrameStats();
+      assert.deepEqual([drawnCount, totalCount], [1, 2]);
+    });
+
+    it("setShapeMode and setCameraMode switch the pipeline and projection", () => {
+      const { scene, device } = createScene({ shapeMode: "circle" });
+
+      scene.setShapeMode("quad");
+      assert.equal(scene.getShapeMode(), "quad");
+      assert.deepEqual(device.pipelines.at(-1)!.fragment!.constants, { shape_mode: 0 });
+
+      scene.setCameraMode("perspective3d");
+      assert.equal(scene.getCameraController().getMode(), "3d");
+      assert.equal(scene.getCameraController().getViewProjection()[11], -1);
+    });
+
+    it("getNodeViews exposes read-only node data in insertion order", () => {
+      const { scene } = createScene();
+      scene.addNode([1, 2, 3], [4, 5, 6], [0.5, 0.25, 1]);
+
+      const views = scene.getNodeViews();
+      assert.deepEqual([...views.positions], [1, 2, 3]);
+      assert.deepEqual([...views.scales], [4, 5, 6]);
+      assert.deepEqual([...views.colors], [0.5, 0.25, 1]);
+    });
+  });
 });

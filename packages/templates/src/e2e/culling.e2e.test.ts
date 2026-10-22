@@ -76,14 +76,44 @@ describe("frustum culling through InstancedRenderer.renderCulled", () => {
     assert.equal(bind.args[0], 0);
   });
 
-  it("an unchanged culled frame still uploads the visible set but not the camera", () => {
+  it("an unchanged culled frame uploads nothing and redraws the same 15 instances", () => {
     device.writes.length = 0;
 
     assert.equal(renderer.renderCulled(entities, camera, culling), 15);
 
-    assert.equal(uniformWrites().length, 0);
-    assert.equal(instanceWrites().length, 3);
+    assert.equal(device.writes.length, 0);
+    assert.deepEqual(renderer.getLastFrameUploads(), []);
     assert.deepEqual(draws()[0]!.args, [6, 15, 0, 0]);
+  });
+
+  it("an entity edit while culled re-uploads the visible set once, then nothing", () => {
+    entities.updateEntity(7, { color: "#00ff00" });
+    device.writes.length = 0;
+
+    assert.equal(renderer.renderCulled(entities, camera, culling), 15);
+    assert.equal(instanceWrites().length, 3);
+    assert.equal(uniformWrites().length, 0);
+    assert.deepEqual(
+      renderer.getLastFrameUploads().map((u) => [u.channel, u.byteOffset, u.byteLength]),
+      [
+        ["position", 0, 15 * 12],
+        ["scale", 0, 15 * 12],
+        ["color", 0, 15 * 12],
+      ],
+    );
+
+    device.writes.length = 0;
+    renderer.renderCulled(entities, camera, culling);
+    assert.equal(device.writes.length, 0);
+  });
+
+  it("a camera move while culled re-culls even though no entity changed", () => {
+    camera.panByPixels(0, 0, 100); // marks the camera dirty without moving it
+    device.writes.length = 0;
+
+    assert.equal(renderer.renderCulled(entities, camera, culling), 15);
+    assert.equal(uniformWrites().length, 1);
+    assert.equal(instanceWrites().length, 3);
   });
 
   it("zooming out so everything is visible switches to the dirty-tracked full upload", () => {

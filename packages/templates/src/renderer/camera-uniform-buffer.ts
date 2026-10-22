@@ -1,5 +1,6 @@
 import type { Camera } from "@engine/core/pkg/engine.js";
 import { BYTES_PER_FLOAT } from "../memory/vec3-layout.ts";
+import { bufferUsage } from "./gpu-flags.ts";
 
 const MATRIX_FLOATS = 16;
 const MATRIX_BYTES = MATRIX_FLOATS * BYTES_PER_FLOAT;
@@ -19,7 +20,7 @@ export class CameraUniformBuffer {
     this.uniformBuffer = device.createBuffer({
       label: "camera-view-proj",
       size: MATRIX_BYTES,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      usage: bufferUsage().UNIFORM | bufferUsage().COPY_DST,
     });
     this.bindGroup = device.createBindGroup({
       label: "camera-bind-group",

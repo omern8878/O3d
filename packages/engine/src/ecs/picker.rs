@@ -54,13 +54,12 @@ impl ScenePicker {
 impl ScenePicker {
     /// Dense index of the entity the ray reaches first.
     fn nearest_hit(buffer: &EntityBuffer, ray: &Ray) -> Option<usize> {
-        let positions = buffer.positions_slice().chunks_exact(FLOATS_PER_VEC3);
-        let scales = buffer.scales_slice().chunks_exact(FLOATS_PER_VEC3);
+        let (positions, _) = buffer.positions_slice().as_chunks::<FLOATS_PER_VEC3>();
+        let (scales, _) = buffer.scales_slice().as_chunks::<FLOATS_PER_VEC3>();
 
         let mut best: Option<(usize, f32)> = None;
-        for (dense_index, (position, scale)) in positions.zip(scales).enumerate() {
-            let center = [position[0], position[1], position[2]];
-            let Some(radius) = Self::pick_radius([scale[0], scale[1], scale[2]]) else {
+        for (dense_index, (&center, &scale)) in positions.iter().zip(scales).enumerate() {
+            let Some(radius) = Self::pick_radius(scale) else {
                 continue;
             };
             let Some(distance) = ray.intersect_sphere(center, radius) else {

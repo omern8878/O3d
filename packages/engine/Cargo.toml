@@ -2,6 +2,9 @@
 name = "engine"
 version = "0.1.0"
 edition = "2021"
+description = "Zero-copy ECS, cameras, frustum culling and picking for the O3d WebGPU renderer"
+license = "MIT"
+repository = "https://github.com/omern8878/O3d"
 
 [lib]
 crate-type = ["cdylib"]

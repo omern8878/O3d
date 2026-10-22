@@ -79,4 +79,17 @@ describe("DirtyTracker", () => {
 
     assert.equal(tracker.getRange("position", 10), null);
   });
+
+  it("isClean is true only while no channel has an active dirty index", () => {
+    const tracker = new DirtyTracker();
+    assert.equal(tracker.isClean(10), true);
+
+    tracker.markDirty("color", 4);
+    assert.equal(tracker.isClean(10), false);
+    // Index 4 no longer exists once only 3 entities remain.
+    assert.equal(tracker.isClean(3), true);
+
+    tracker.clear();
+    assert.equal(tracker.isClean(10), true);
+  });
 });

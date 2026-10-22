@@ -7,6 +7,8 @@ import {
 import type { EntityManager } from "../scene/entity-manager.ts";
 import type { VisibleViews } from "../types/culling.types.ts";
 import type { ReadonlyFloat32Array } from "../types/readonly-buffer.types.ts";
+import { bufferUsage } from "./gpu-flags.ts";
+import type { UploadMeter } from "./upload-meter.ts";
 
 /** The slice of `EntityManager` this class reads from. */
 type InstanceSource = Pick<
@@ -19,7 +21,8 @@ type InstanceSource = Pick<
  * in sync with the Wasm entity data.
  *
  * The three buffers are replaced when the GPU capacity grows, so read them
- * through this object each frame instead of caching them.
+ * through this object each frame instead of caching them. When an
+ * {@link UploadMeter} is given, every write is recorded on it.
  */
 export class GpuInstanceBuffers {
   positionsBuffer: GPUBuffer;
@@ -28,9 +31,11 @@ export class GpuInstanceBuffers {
   gpuCapacity: number;
 
   private readonly device: GPUDevice;
+  private readonly meter: UploadMeter | null;
 
-  constructor(device: GPUDevice, initialCapacity: number) {
+  constructor(device: GPUDevice, initialCapacity: number, meter: UploadMeter | null = null) {
     this.device = device;
+    this.meter = meter;
     this.gpuCapacity = Math.max(initialCapacity, 1);
     this.positionsBuffer = this.createBuffer("instance-positions");
     this.scalesBuffer = this.createBuffer("instance-scales");
@@ -72,6 +77,7 @@ export class GpuInstanceBuffers {
       const floatOffset = range.min * FLOATS_PER_VEC3;
       const floatLength = (range.max - range.min + 1) * FLOATS_PER_VEC3;
       this.writeToGpu(
+        channel,
         gpuBuffer,
         floatOffset * BYTES_PER_FLOAT,
         view.subarray(floatOffset, floatOffset + floatLength),
@@ -99,9 +105,9 @@ export class GpuInstanceBuffers {
     this.ensureGpuCapacity(visibleCount);
 
     const floatLength = visibleCount * FLOATS_PER_VEC3;
-    this.writeToGpu(this.positionsBuffer, 0, views.positions.subarray(0, floatLength));
-    this.writeToGpu(this.scalesBuffer, 0, views.scales.subarray(0, floatLength));
-    this.writeToGpu(this.colorsBuffer, 0, views.colors.subarray(0, floatLength));
+    this.writeToGpu("position", this.positionsBuffer, 0, views.positions.subarray(0, floatLength));
+    this.writeToGpu("scale", this.scalesBuffer, 0, views.scales.subarray(0, floatLength));
+    this.writeToGpu("color", this.colorsBuffer, 0, views.colors.subarray(0, floatLength));
 
     return visibleCount;
   }
@@ -133,19 +139,20 @@ export class GpuInstanceBuffers {
    * just reads the source during `writeBuffer`, so no mutation can happen.
    */
   private writeToGpu(
+    channel: ChannelType,
     gpuBuffer: GPUBuffer,
     byteOffset: number,
     data: ReadonlyFloat32Array,
   ): void {
     this.device.queue.writeBuffer(gpuBuffer, byteOffset, data as Float32Array);
+    this.meter?.record({ channel, byteOffset, byteLength: data.byteLength });
   }
 
   private createBuffer(label: string): GPUBuffer {
     return this.device.createBuffer({
       label,
       size: this.gpuCapacity * BYTES_PER_VEC3,
-      // Read lazily: `GPUBufferUsage` does not exist where WebGPU is unsupported.
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+      usage: bufferUsage().VERTEX | bufferUsage().COPY_DST,
     });
   }
 
