@@ -13,6 +13,7 @@
 use wasm_bindgen::prelude::*;
 
 use super::entity_buffer::EntityBuffer;
+use crate::math::bounding_volume::BoundingVolume;
 use crate::math::camera::Camera;
 use crate::math::frustum::Frustum;
 
@@ -85,6 +86,26 @@ impl CullingBuffer {
         }
 
         self.visible_count
+    }
+
+    /// Whole-scene trivial accept: whether `bounds` (the flat bounding-volume
+    /// layout `[cx, cy, cz, r, min_x, min_y, min_z, max_x, max_y, max_z]`)
+    /// lies entirely inside `camera`'s frustum. When the volume encloses every
+    /// entity, `true` means a `cull()` would keep all of them, so it can be
+    /// skipped. Malformed or non-finite bounds return `false` (cull as usual).
+    pub fn bounds_fully_visible(camera: &Camera, bounds: &[f32]) -> bool {
+        BoundingVolume::from_slice(bounds).is_some_and(|volume| {
+            Frustum::from_view_proj(camera.view_proj_mat()).contains_volume(&volume)
+        })
+    }
+
+    /// The bounding volume of every active entity of `buffer`, as the culler
+    /// sees them, in the flat layout above. One O(n) pass; empty when the
+    /// buffer is empty or holds non-finite data.
+    pub fn compute_scene_bounds(buffer: &EntityBuffer) -> Vec<f32> {
+        BoundingVolume::enclose_entities(buffer.positions_slice(), buffer.scales_slice())
+            .map(|volume| volume.to_array().to_vec())
+            .unwrap_or_default()
     }
 
     /// Number of entities that passed the last `cull()`.

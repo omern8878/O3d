@@ -132,6 +132,11 @@ export class CameraController {
     return true;
   }
 
+  /** Frees the Wasm camera. The controller must not be used afterwards. */
+  destroy(): void {
+    this.wasmCamera.free();
+  }
+
   /**
    * The underlying Wasm camera, for Wasm-side systems such as culling.
    * @internal Mutating it directly bypasses the controller's dirty flag.

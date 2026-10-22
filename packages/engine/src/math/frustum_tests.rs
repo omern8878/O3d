@@ -172,3 +172,118 @@ fn contains_entity_uses_half_the_box_diagonal_as_radius() {
     assert!(frustum.contains_entity([114.0, 0.0, 0.0], [30.0, 0.0, 0.0]));
     assert!(!frustum.contains_entity([116.0, 0.0, 0.0], [30.0, 0.0, 0.0]));
 }
+
+#[test]
+fn contains_sphere_accepts_only_spheres_fully_inside_every_plane() {
+    // Ortho camera at z = 10: x, y in [-100, 100], near plane at z = 9.9.
+    let frustum = ortho_frustum();
+
+    assert!(frustum.contains_sphere([0.0, 0.0, -100.0], 50.0));
+    assert!(
+        frustum.contains_sphere([0.0, 0.0, -100.0], 100.0),
+        "touching the sides is still inside"
+    );
+    assert!(
+        !frustum.contains_sphere([0.0, 0.0, -100.0], 100.5),
+        "pokes out of all four sides"
+    );
+    assert!(
+        !frustum.contains_sphere([80.0, 0.0, -100.0], 30.0),
+        "crosses the right plane"
+    );
+    assert!(
+        !frustum.contains_sphere([0.0, 0.0, 9.0], 2.0),
+        "crosses the near plane"
+    );
+}
+
+#[test]
+fn contains_sphere_is_stricter_than_intersects_sphere() {
+    let frustum = perspective_frustum();
+    for (center, radius) in [
+        ([0.0, 0.0, -50.0], 5.0),
+        ([0.0, 0.0, -50.0], 30.0),
+        ([40.0, 0.0, -50.0], 10.0),
+        ([0.0, 0.0, -2000.0], 1.0),
+    ] {
+        if frustum.contains_sphere(center, radius) {
+            assert!(
+                frustum.intersects_sphere(center, radius),
+                "{center:?} r={radius}"
+            );
+        }
+    }
+    assert!(frustum.contains_sphere([0.0, 0.0, -50.0], 5.0));
+    assert!(!frustum.contains_sphere([0.0, 0.0, -50.0], 30.0));
+}
+
+#[test]
+fn contains_aabb_accepts_a_flat_2d_scene_whose_sphere_would_bulge_out() {
+    // A flat 180 x 180 layer at z = 0, 9.9 units behind the near plane.
+    let frustum = ortho_frustum();
+    let (min, max) = ([-90.0, -90.0, 0.0], [90.0, 90.0, 0.0]);
+
+    assert!(frustum.contains_aabb(min, max));
+    assert!(
+        !frustum.contains_sphere([0.0, 0.0, 0.0], 127.3),
+        "its bounding sphere crosses near and far"
+    );
+    assert!(
+        !frustum.contains_aabb([-90.0, -90.0, 0.0], [110.0, 90.0, 0.0]),
+        "crosses the right plane"
+    );
+    assert!(
+        !frustum.contains_aabb([-1.0, -1.0, 0.0], [1.0, 1.0, 20.0]),
+        "crosses the near plane"
+    );
+}
+
+#[test]
+fn contains_volume_accepts_when_either_shape_fits() {
+    let frustum = ortho_frustum();
+    let flat = BoundingVolume {
+        center: [0.0; 3],
+        radius: 127.3,
+        min: [-90.0, -90.0, 0.0],
+        max: [90.0, 90.0, 0.0],
+    };
+    let round = BoundingVolume {
+        center: [0.0, 0.0, -100.0],
+        radius: 90.0,
+        min: [-90.0, -90.0, -190.0],
+        max: [90.0, 90.0, 10.0],
+    };
+    let too_big = BoundingVolume {
+        center: [0.0, 0.0, -100.0],
+        radius: 150.0,
+        min: [-150.0; 3],
+        max: [150.0; 3],
+    };
+
+    assert!(frustum.contains_volume(&flat), "box fits");
+    assert!(
+        frustum.contains_volume(&round),
+        "sphere fits (the box pokes through the near plane)"
+    );
+    assert!(!frustum.contains_volume(&too_big));
+}
+
+#[test]
+fn trivial_accept_rejects_invalid_input_and_degenerate_planes() {
+    let frustum = ortho_frustum();
+    assert!(!frustum.contains_sphere([f32::NAN, 0.0, 0.0], 1.0));
+    assert!(!frustum.contains_sphere([0.0, 0.0, -100.0], f32::INFINITY));
+    assert!(!frustum.contains_sphere([0.0, 0.0, -100.0], -1.0));
+    assert!(
+        !frustum.contains_aabb([1.0, 0.0, -100.0], [0.0, 0.0, -100.0]),
+        "inverted box"
+    );
+    assert!(!frustum.contains_aabb([f32::NAN, 0.0, 0.0], [1.0, 1.0, 1.0]));
+
+    let degenerate = Frustum::from_view_proj(&Mat4([0.0; 16]));
+    assert!(
+        !degenerate.contains_sphere([0.0; 3], 0.0),
+        "never trivially accept on a broken camera"
+    );
+    assert!(!degenerate.contains_aabb([0.0; 3], [0.0; 3]));
+}

@@ -1,4 +1,5 @@
 use super::*;
+use crate::math::bounding_volume::BoundingVolume;
 
 /// Default camera: Ortho2D, aspect 1, so x and y in [-100, 100] are visible.
 fn camera() -> Camera {
@@ -220,4 +221,95 @@ fn culling_an_empty_buffer_twice_stays_consistent() {
     assert_eq!(culling.cull(&empty, &camera()), 0);
     assert_eq!(culling.cull(&empty, &camera()), 0);
     assert!(culling.visible_ids.is_empty());
+}
+
+/// Bounds `[cx, cy, cz, r, min.., max..]` of a sphere and a box.
+fn bounds(center: [f32; 3], radius: f32, min: [f32; 3], max: [f32; 3]) -> Vec<f32> {
+    [center.as_slice(), &[radius], &min, &max].concat()
+}
+
+#[test]
+fn bounds_fully_visible_trivially_accepts_contained_volumes_only() {
+    let camera = camera(); // x, y in [-100, 100]; near plane at z = 9.9
+
+    let flat_inside = bounds([0.0; 3], 127.3, [-90.0, -90.0, 0.0], [90.0, 90.0, 0.0]);
+    let flat_too_wide = bounds([0.0; 3], 212.2, [-150.0, -150.0, 0.0], [150.0, 150.0, 0.0]);
+    assert!(CullingBuffer::bounds_fully_visible(&camera, &flat_inside));
+    assert!(!CullingBuffer::bounds_fully_visible(
+        &camera,
+        &flat_too_wide
+    ));
+}
+
+#[test]
+fn malformed_bounds_are_never_trivially_accepted() {
+    let camera = camera();
+    let mut nan = bounds([0.0; 3], 1.0, [-1.0; 3], [1.0; 3]);
+    nan[0] = f32::NAN;
+
+    assert!(!CullingBuffer::bounds_fully_visible(&camera, &[]));
+    assert!(!CullingBuffer::bounds_fully_visible(&camera, &[0.0; 9]));
+    assert!(!CullingBuffer::bounds_fully_visible(&camera, &nan));
+}
+
+#[test]
+fn scene_bounds_enclose_every_entity_the_culler_tests() {
+    let buffer = scene();
+    let volume = BoundingVolume::from_slice(&CullingBuffer::compute_scene_bounds(&buffer)).unwrap();
+
+    for i in 0..buffer.active_count() {
+        let p = &buffer.positions_slice()[i * 3..i * 3 + 3];
+        let s = &buffer.scales_slice()[i * 3..i * 3 + 3];
+        let radius = 0.5 * (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt();
+        let distance = (0..3)
+            .map(|a| (p[a] - volume.center[a]).powi(2))
+            .sum::<f32>()
+            .sqrt();
+        assert!(distance + radius <= volume.radius + 1e-3);
+        for ((&coordinate, &min), &max) in p.iter().zip(&volume.min).zip(&volume.max) {
+            assert!(coordinate - radius >= min - 1e-3 && coordinate + radius <= max + 1e-3);
+        }
+    }
+}
+
+#[test]
+fn a_trivially_accepted_scene_is_exactly_what_a_full_cull_keeps() {
+    // Flat 2D layout (z = 0): only the box can be trivially accepted.
+    let mut buffer = EntityBuffer::new(4);
+    for (i, position) in INSIDE.iter().enumerate() {
+        add(
+            &mut buffer,
+            [position[0] * 0.5, position[1] * 0.5, 0.0],
+            (i + 1) as f32,
+        );
+    }
+    let camera = camera();
+
+    assert!(CullingBuffer::bounds_fully_visible(
+        &camera,
+        &CullingBuffer::compute_scene_bounds(&buffer)
+    ));
+    assert_eq!(
+        CullingBuffer::new(4).cull(&buffer, &camera),
+        buffer.active_count()
+    );
+}
+
+#[test]
+fn a_partly_visible_scene_is_not_trivially_accepted() {
+    let buffer = scene(); // 4 of 10 entities on screen
+
+    assert!(!CullingBuffer::bounds_fully_visible(
+        &camera(),
+        &CullingBuffer::compute_scene_bounds(&buffer)
+    ));
+}
+
+#[test]
+fn scene_bounds_of_an_empty_or_non_finite_buffer_are_empty() {
+    assert!(CullingBuffer::compute_scene_bounds(&EntityBuffer::new(1)).is_empty());
+
+    let mut buffer = EntityBuffer::new(1);
+    add(&mut buffer, [f32::NAN, 0.0, 0.0], 1.0);
+    assert!(CullingBuffer::compute_scene_bounds(&buffer).is_empty());
 }

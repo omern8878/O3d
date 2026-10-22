@@ -20,6 +20,32 @@ export class CullingManager {
     this.wasmMemoryFn = wasmMemoryFn;
   }
 
+  /**
+   * Whole-scene trivial accept in O(1): whether every entity is certainly
+   * inside the camera frustum (the scene's bounding sphere or box lies inside
+   * all six planes), so a per-entity cull would keep everything and can be
+   * skipped.
+   *
+   * Bounds only grow between recomputes; when a grown volume fails the test,
+   * it is recomputed exactly (one O(n) pass) and tested again, so looseness
+   * never costs a missed trivial accept.
+   */
+  isSceneFullyVisible(entityManager: EntityManager, cameraController: CameraController): boolean {
+    if (entityManager.getActiveCount() === 0) {
+      return true;
+    }
+    const camera = cameraController.getRawWasmCamera();
+    const bounds = entityManager.getSceneBounds();
+    if (bounds.usable && CullingBuffer.bounds_fully_visible(camera, bounds.toArray())) {
+      return true;
+    }
+    if (!bounds.grown) {
+      return false;
+    }
+    entityManager.recomputeSceneBounds();
+    return bounds.usable && CullingBuffer.bounds_fully_visible(camera, bounds.toArray());
+  }
+
   /** Culls against the camera's frustum and returns the visible count. */
   cullEntities(
     entityManager: EntityManager,
@@ -29,6 +55,11 @@ export class CullingManager {
       entityManager.getRawWasmBuffer(),
       cameraController.getRawWasmCamera(),
     );
+  }
+
+  /** Frees the Wasm culling buffers. The manager must not be used afterwards. */
+  destroy(): void {
+    this.wasmCulling.free();
   }
 
   /**

@@ -132,6 +132,11 @@ export class InstancedRenderer {
    * fully on-screen, unchanged scene uploads nothing. A partially visible
    * scene is re-culled and re-uploaded only when the camera or the entities
    * changed, so an unchanged zoomed-in frame uploads nothing either.
+   *
+   * Before culling, the whole scene's bounding volume is tested against the
+   * frustum in O(1). When it lies fully inside, the per-entity cull and
+   * stream compaction are skipped and the dense, dirty-tracked buffers are
+   * drawn directly.
    */
   renderCulled(
     entityManager: EntityManager,
@@ -150,6 +155,10 @@ export class InstancedRenderer {
       dirtyTracker.isClean(activeCount);
     if (culledSubsetIsCurrent) {
       return this.drawFrame(this.culledVisibleCount);
+    }
+
+    if (cullingManager.isSceneFullyVisible(entityManager, cameraController)) {
+      return this.drawFrame(this.syncDenseEntities(entityManager));
     }
 
     const visibleCount = cullingManager.cullEntities(entityManager, cameraController);

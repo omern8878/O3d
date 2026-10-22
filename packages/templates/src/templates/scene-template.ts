@@ -196,9 +196,16 @@ export class SceneTemplate {
     return this.entities.getActiveCount();
   }
 
-  /** Frees the GPU resources. The scene must not be used afterwards. */
+  /**
+   * Frees the GPU buffers and the scene's Wasm memory (entities, camera,
+   * culling and picking state). The scene must not be used afterwards.
+   */
   destroy(): void {
     this.renderer.destroy();
+    this.culling?.destroy();
+    this.picking.destroy();
+    this.camera.destroy();
+    this.entities.destroy();
   }
 }
 

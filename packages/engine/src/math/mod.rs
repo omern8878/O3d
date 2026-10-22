@@ -1,5 +1,6 @@
 //! Pure mathematics: vectors, matrices, cameras and visibility culling.
 
+pub mod bounding_volume;
 pub mod camera;
 pub mod frustum;
 pub mod input_guard;
