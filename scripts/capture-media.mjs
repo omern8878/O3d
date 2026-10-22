@@ -1,6 +1,7 @@
 // Captures the README media from the production playground build:
 //   docs/media/cat-2d-ortho.png, cat-3d-orbit.png, cat-zoomed-culling.png,
-//   benchmark-results.png (+ .json), cat-showcase.webm and cat-showcase.gif.
+//   cat-showcase.webm and cat-showcase.gif.
+// The benchmark media come from `npm run benchmark` (scripts/run-benchmarks.mjs).
 //
 // Usage: npm run build && npm run capture:media
 // Uses the installed Google Chrome (real WebGPU) unless O3D_BROWSER_CHANNEL
@@ -42,12 +43,6 @@ try {
 
 async function captureStills() {
   const page = await openShowcase(VIEWPORT);
-  let report = null;
-  page.on("console", async (message) => {
-    if (message.text().startsWith("O3d benchmark report")) {
-      report = await message.args()[1]?.jsonValue();
-    }
-  });
 
   // 2D: the eyes sit at about (640, 270) in the default 1280 x 800 framing.
   await page.click("[data-testid=camera-ortho2d]");
@@ -69,14 +64,6 @@ async function captureStills() {
   for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -120);
   await settle(page, 900);
   await shot(page, "cat-zoomed-culling.png");
-  await page.click("[data-testid=camera-perspective3d]");
-
-  await page.click("[data-testid=reset-view]");
-  await page.click("[data-testid=run-benchmark]");
-  await page.waitForSelector("[data-testid=benchmark-panel][data-state=done]", { timeout: 180_000 });
-  await settle(page, 300);
-  await shot(page, "benchmark-results.png");
-  if (report) writeFileSync(join(media, "benchmark-results.json"), `${JSON.stringify(report, null, 2)}\n`);
   await page.close();
 }
 

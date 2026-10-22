@@ -1,10 +1,14 @@
-import { EntityBuffer, wasm_memory } from "@engine/core/pkg/engine.js";
+import { CullingBuffer, EntityBuffer, wasm_memory } from "@engine/core/pkg/engine.js";
 import { DirtyTracker } from "../memory/dirty-tracker.ts";
 import { FLOATS_PER_VEC3 } from "../memory/vec3-layout.ts";
 import { WasmBufferView } from "../memory/wasm-buffer-view.ts";
 import type { EntityId, EntityTransform } from "../types/entity.types.ts";
 import type { ReadonlyRawEntityViews } from "../types/readonly-buffer.types.ts";
 import { parseColor } from "../utils/color.utils.ts";
+import { SceneBounds } from "./scene-bounds.ts";
+
+/** An entity's culling radius is half its scale diagonal. */
+const HALF = 0.5;
 
 /**
  * Developer-facing facade for creating, updating and removing entities.
@@ -17,6 +21,7 @@ export class EntityManager {
   private readonly buffer: EntityBuffer;
   private readonly view: WasmBufferView;
   private readonly dirtyTracker = new DirtyTracker();
+  private readonly bounds = new SceneBounds();
 
   constructor(initialCapacity: number = 1000) {
     this.buffer = new EntityBuffer(initialCapacity);
@@ -36,6 +41,7 @@ export class EntityManager {
       if (initial) {
         this.applyTransform(denseIdx, initial);
       }
+      this.includeInBounds(denseIdx);
     }
     return id;
   }
@@ -54,6 +60,9 @@ export class EntityManager {
     // Mark first: applyTransform can throw (invalid color) after a partial write.
     this.markTransformDirty(denseIdx, transform);
     this.applyTransform(denseIdx, transform);
+    if (transform.position || transform.scale) {
+      this.includeInBounds(denseIdx);
+    }
   }
 
   /** Removes an entity. Unknown IDs are ignored. */
@@ -75,6 +84,20 @@ export class EntityManager {
   }
 
   /**
+   * A conservative bounding volume of every entity, grown in O(1) on each
+   * write. Used for whole-scene trivial accept before culling.
+   * @internal
+   */
+  getSceneBounds(): SceneBounds {
+    return this.bounds;
+  }
+
+  /** Recomputes the scene bounds exactly from the Wasm data, in one O(n) pass. */
+  recomputeSceneBounds(): void {
+    this.bounds.replace(CullingBuffer.compute_scene_bounds(this.buffer));
+  }
+
+  /**
    * The underlying Wasm buffer, for Wasm-side systems such as culling.
    * @internal Mutating it directly bypasses dirty tracking.
    */
@@ -84,6 +107,11 @@ export class EntityManager {
 
   getActiveCount(): number {
     return this.buffer.active_count();
+  }
+
+  /** Frees the entity storage in Wasm memory. The manager must not be used afterwards. */
+  destroy(): void {
+    this.buffer.free();
   }
 
   getCapacity(): number {
@@ -102,6 +130,14 @@ export class EntityManager {
       scales: this.view.getScalesView().subarray(0, end),
       colors: this.view.getColorsView().subarray(0, end),
     };
+  }
+
+  private includeInBounds(denseIdx: number): void {
+    const o = denseIdx * FLOATS_PER_VEC3;
+    const positions = this.view.getPositionsView();
+    const scales = this.view.getScalesView();
+    const radius = HALF * Math.hypot(scales[o]!, scales[o + 1]!, scales[o + 2]!);
+    this.bounds.include(positions[o]!, positions[o + 1]!, positions[o + 2]!, radius);
   }
 
   private markTransformDirty(denseIdx: number, transform: EntityTransform): void {

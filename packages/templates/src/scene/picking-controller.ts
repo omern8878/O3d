@@ -34,6 +34,11 @@ export class PickingController {
     return id >= 0 ? id : null;
   }
 
+  /** Frees the Wasm picker. The controller must not be used afterwards. */
+  destroy(): void {
+    this.wasmPicker.free();
+  }
+
   /**
    * Picks at a pointer position, e.g. `event.clientX` / `event.clientY` with
    * the canvas's `getBoundingClientRect()`. Returns `null` for an empty

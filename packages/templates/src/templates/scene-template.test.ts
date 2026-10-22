@@ -299,4 +299,19 @@ describe("SceneTemplate", () => {
       assert.deepEqual([...views.colors], [0.5, 0.25, 1]);
     });
   });
+
+  it("destroy() returns the scene's Wasm memory so rebuilding does not grow the heap", () => {
+    const memory = () => (wasm_memory() as WebAssembly.Memory).buffer.byteLength;
+    const build = () => {
+      const { scene } = createScene({ initialCapacity: 50_000 });
+      for (let i = 0; i < 50_000; i++) scene.addNode([i, 0, 0], [1, 1, 1], [1, 1, 1]);
+      scene.renderFrame();
+      scene.destroy();
+    };
+    build();
+    const afterFirst = memory();
+    for (let i = 0; i < 5; i++) build();
+
+    assert.equal(memory(), afterFirst);
+  });
 });

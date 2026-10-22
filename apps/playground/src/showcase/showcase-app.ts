@@ -1,5 +1,5 @@
-import { BenchmarkSuite, GpuContext, type SceneCameraMode, type ShapeMode } from '@engine/templates'
-import { BenchmarkPanel } from '../ui/benchmark-panel.ts'
+import type { SceneCameraMode, ShapeMode } from '@engine/templates'
+import { CompetitorBenchmarkPanel } from '../ui/competitor-benchmark-panel.ts'
 import { Hud, type HudSettings, type ParticleCount } from '../ui/hud.ts'
 import { CAT_LAYER_LABELS, CAT_SVG, CAT_TAIL_LAYER, CAT_TAIL_PIVOT } from '../vector/cat-vector-svg.ts'
 import type { PointLayer, SvgPointCloud } from '../vector/point-cloud.types.ts'
@@ -12,7 +12,6 @@ import { createRenderBackend, type RenderBackend } from './render-backend.ts'
 import { ShowcaseScene } from './showcase-scene.ts'
 import { TailAnimator } from './tail-animator.ts'
 
-const BENCHMARK_ENTITIES = 100_000
 const BUILT_IN_LABEL = 'Vector cat (built-in)'
 
 type SvgSource = { markup: string; label: string; builtIn: boolean }
@@ -26,7 +25,7 @@ export class ShowcaseApp {
   private readonly canvas: HTMLCanvasElement
   private readonly backend: RenderBackend
   private readonly hud: Hud
-  private readonly benchmarkPanel: BenchmarkPanel
+  private readonly benchmarkPanel: CompetitorBenchmarkPanel
   private readonly rig = new CameraRig()
   private readonly pulse = new PickPulse()
   private readonly telemetry = new FrameTelemetry()
@@ -40,7 +39,6 @@ export class ShowcaseApp {
   private current!: ShowcaseScene
   private tail: TailAnimator | null = null
   private viewport = { width: 0, height: 0 }
-  private benchmarkContext: Promise<GpuContext | undefined> | null = null
   private benchmarkRunning = false
 
   /** Builds the page inside `root` and starts the render loop. */
@@ -67,7 +65,7 @@ export class ShowcaseApp {
       onRunBenchmark: () => void this.runBenchmark(),
     })
     this.hud.setBackend(backend.kind, backend.detail)
-    this.benchmarkPanel = new BenchmarkPanel(root)
+    this.benchmarkPanel = new CompetitorBenchmarkPanel(root)
     new PointerControls(canvas, () => this.current.scene, {
       onTap: (x, y) => this.pick(x, y),
       onCameraInteraction: () => this.rig.stopSway(),
@@ -190,34 +188,29 @@ export class ShowcaseApp {
     if (layer) this.pulse.start(layer, performance.now())
   }
 
+  /**
+   * Runs the competitor benchmark (O3d vs. Three.js vs. a JS scene graph).
+   * The suite and Three.js load on demand, keeping them out of the showcase
+   * bundle. The report is also left on `window.__o3dBenchmarkReport`.
+   */
   private async runBenchmark(): Promise<void> {
     if (this.benchmarkRunning) return
     this.benchmarkRunning = true
-    this.benchmarkPanel.showRunning(BENCHMARK_ENTITIES)
+    this.benchmarkPanel.showProgress(0, 'Loading benchmark…')
     try {
-      const gpuContext = await this.benchmarkGpuContext()
-      const report = await new BenchmarkSuite(gpuContext).run(
-        { entityCount: BENCHMARK_ENTITIES },
-        (completed) => this.benchmarkPanel.showRunning(BENCHMARK_ENTITIES, completed),
+      const { runCompetitorBenchmark, benchmarkOptionsFromUrl } = await import('../benchmark/run-competitor-benchmark.ts')
+      const report = await runCompetitorBenchmark(
+        this.backend.kind === 'webgpu',
+        benchmarkOptionsFromUrl(location.search),
+        ({ fraction, message }) => this.benchmarkPanel.showProgress(fraction, message),
       )
+      ;(window as { __o3dBenchmarkReport?: unknown }).__o3dBenchmarkReport = report
       this.benchmarkPanel.showReport(report)
-      console.info('O3d benchmark report', report)
     } catch (error) {
+      console.error(error)
       this.benchmarkPanel.showError(`Benchmark failed: ${error instanceof Error ? error.message : error}`)
     } finally {
       this.benchmarkRunning = false
     }
-  }
-
-  /**
-   * A separate offscreen WebGPU context so benchmark frames include real
-   * upload costs without flashing on screen; headless without WebGPU.
-   */
-  private benchmarkGpuContext(): Promise<GpuContext | undefined> {
-    this.benchmarkContext ??= this.backend.kind === 'webgpu'
-      ? GpuContext.create({ canvas: Object.assign(document.createElement('canvas'), { width: 64, height: 64 }) })
-          .catch(() => undefined)
-      : Promise.resolve(undefined)
-    return this.benchmarkContext
   }
 }

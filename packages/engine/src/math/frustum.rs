@@ -6,6 +6,7 @@
 //! (`clip = view_proj * point`). A point is inside the frustum when it lies on
 //! the positive side of all six planes.
 
+use super::bounding_volume::BoundingVolume;
 use super::mat4::Mat4;
 use super::vec3::dot;
 
@@ -101,6 +102,43 @@ impl Frustum {
         self.planes
             .iter()
             .all(|plane| plane.distance_to_point(center) >= -radius)
+    }
+
+    /// Trivial-accept test: `true` only if the whole sphere lies inside every
+    /// plane (signed distance `>= radius`), so everything it bounds is visible
+    /// and per-entity culling can be skipped. Non-finite input and degenerate
+    /// (zero-normal) planes give `false`, which falls back to full culling.
+    pub fn contains_sphere(&self, center: [f32; 3], radius: f32) -> bool {
+        if !radius.is_finite() || radius < 0.0 || !center.iter().all(|c| c.is_finite()) {
+            return false;
+        }
+        self.planes
+            .iter()
+            .all(|plane| plane.normal != [0.0; 3] && plane.distance_to_point(center) >= radius)
+    }
+
+    /// Trivial-accept test for a box: `true` only if all of it lies inside
+    /// every plane, i.e. its corner nearest each plane is inside. Non-finite or
+    /// inverted boxes and degenerate planes give `false`.
+    pub fn contains_aabb(&self, min: [f32; 3], max: [f32; 3]) -> bool {
+        let finite = min.iter().chain(&max).all(|v| v.is_finite());
+        if !finite || (0..3).any(|axis| min[axis] > max[axis]) {
+            return false;
+        }
+        let center: [f32; 3] = std::array::from_fn(|axis| 0.5 * (min[axis] + max[axis]));
+        let half: [f32; 3] = std::array::from_fn(|axis| 0.5 * (max[axis] - min[axis]));
+        self.planes.iter().all(|plane| {
+            let n = plane.normal;
+            let reach = n[0].abs() * half[0] + n[1].abs() * half[1] + n[2].abs() * half[2];
+            n != [0.0; 3] && plane.distance_to_point(center) >= reach
+        })
+    }
+
+    /// Whole-scene trivial accept: the volume's sphere *or* its box lies fully
+    /// inside, so every entity it bounds is visible.
+    pub fn contains_volume(&self, volume: &BoundingVolume) -> bool {
+        self.contains_sphere(volume.center, volume.radius)
+            || self.contains_aabb(volume.min, volume.max)
     }
 
     /// Visibility of a unit quad or cube centered at `pos` and stretched by

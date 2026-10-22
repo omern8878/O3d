@@ -7,16 +7,18 @@
     "dev": "vite",
     "build": "tsc -p . && vite build",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --no-warnings --test \"src/**/*.test.ts\""
+    "test": "node --import ./test-support/source-alias.mjs --experimental-strip-types --no-warnings --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@engine/core": "*",
     "@engine/templates": "*"
   },
   "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/three": "^0.186.0",
     "@webgpu/types": "^0.1.74",
+    "three": "^0.186.1",
     "typescript": "~6.0.2",
-    "vite": "^8.3.0",
-    "@types/node": "^22.20.5"
+    "vite": "^8.3.0"
   }
 }
