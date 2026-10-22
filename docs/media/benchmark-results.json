@@ -1,0 +1,80 @@
+{
+  "entityCount": 100000,
+  "iterations": 30,
+  "backend": "webgpu",
+  "workloads": [
+    {
+      "id": "static-orbit",
+      "title": "Static scene, orbiting camera",
+      "description": "Camera orbits every frame; no entity changes.",
+      "o3d": {
+        "cpuMs": 0.5,
+        "bytesPerFrame": 0,
+        "drawnInstances": 100000
+      },
+      "baseline": {
+        "cpuMs": 1.699999988079071,
+        "bytesPerFrame": 3600000,
+        "drawnInstances": 100000
+      },
+      "notes": [
+        "O3d sends only the 64-byte camera uniform (not counted as instance bytes)."
+      ]
+    },
+    {
+      "id": "localized-animation",
+      "title": "Localized animation (contiguous slice)",
+      "description": "1000 contiguous nodes move every frame.",
+      "o3d": {
+        "cpuMs": 0.5999999642372131,
+        "bytesPerFrame": 12000,
+        "drawnInstances": 100000
+      },
+      "baseline": {
+        "cpuMs": 1.2000000178813934,
+        "bytesPerFrame": 3600000,
+        "drawnInstances": 100000
+      },
+      "notes": [
+        "Animated slice: node IDs 99000..99999."
+      ]
+    },
+    {
+      "id": "zoomed-culling",
+      "title": "Zoomed-in frustum culling",
+      "description": "Camera zoomed into the cloud and nudged every frame.",
+      "o3d": {
+        "cpuMs": 0.40000003576278687,
+        "bytesPerFrame": 162072,
+        "drawnInstances": 4502
+      },
+      "baseline": {
+        "cpuMs": 1.2000000476837158,
+        "bytesPerFrame": 3600000,
+        "drawnInstances": 100000
+      },
+      "notes": [
+        "4.5% of nodes inside the frustum.",
+        "O3d time includes the Wasm cull, stream compaction and upload; the baseline has no culling."
+      ]
+    },
+    {
+      "id": "raycast-picking",
+      "title": "Raycast picking (inverse view-projection)",
+      "description": "One pointer pick against every node.",
+      "o3d": {
+        "cpuMs": 0.20000004768371582,
+        "bytesPerFrame": null,
+        "drawnInstances": null
+      },
+      "baseline": {
+        "cpuMs": 0.30000001192092896,
+        "bytesPerFrame": null,
+        "drawnInstances": null
+      },
+      "notes": [
+        "Both pickers returned the same node for 25/25 pointer positions."
+      ]
+    }
+  ]
+}

@@ -154,4 +154,47 @@ describe("CameraController", () => {
     assert.ok(m.every(Number.isFinite));
     assert.equal(camera.aspect(), 1);
   });
+
+  it("getMode reflects the configured and switched projection", () => {
+    const controller = new CameraController({ mode: "3d" });
+    assert.equal(controller.getMode(), "3d");
+    controller.setMode("2d");
+    assert.equal(controller.getMode(), "2d");
+    assert.equal(new CameraController().getMode(), "2d");
+  });
+
+  it("getViewProjection is a live, read-only view of the Wasm matrix", () => {
+    const controller = new CameraController({ aspect: 1 });
+    const matrix = controller.getViewProjection();
+    const raw = new Float32Array(
+      (wasm_memory() as WebAssembly.Memory).buffer,
+      controller.getRawWasmCamera().view_proj_ptr(),
+      16,
+    );
+
+    assert.equal(matrix.length, 16);
+    assert.deepEqual([...matrix], [...raw]);
+
+    controller.zoom(2);
+    assert.deepEqual([...controller.getViewProjection()], [...raw]);
+    const forbiddenWrite = () => {
+      // @ts-expect-error the matrix is read-only
+      matrix[0] = 1;
+    };
+    assert.equal(typeof forbiddenWrite, "function");
+  });
+
+  it("setOrthoHalfHeight sets the 2D extent absolutely and marks the camera dirty", () => {
+    const controller = new CameraController({ orthoHalfHeight: 100 });
+    controller.syncIfDirty(recorder());
+    controller.zoom(0.5);
+    const uploads = recorder();
+
+    controller.setOrthoHalfHeight(40);
+
+    assert.equal(controller.getRawWasmCamera().ortho_half_height(), 40);
+    assert.equal(controller.syncIfDirty(uploads), true);
+    controller.setOrthoHalfHeight(Number.NaN);
+    assert.equal(controller.getRawWasmCamera().ortho_half_height(), 40);
+  });
 });

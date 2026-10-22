@@ -61,6 +61,11 @@ export class DirtyTracker {
     return min > max ? null : { min, max };
   }
 
+  /** Whether no channel has a dirty index below `activeCount`. */
+  isClean(activeCount: number): boolean {
+    return CHANNELS.every((channel) => this.getRange(channel, activeCount) === null);
+  }
+
   /** Marks every channel clean. Call after the GPU has been synchronized. */
   clear(): void {
     for (const channel of CHANNELS) {

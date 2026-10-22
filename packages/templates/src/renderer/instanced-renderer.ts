@@ -3,12 +3,15 @@ import { QuadGeometry } from "../geometry/quad-geometry.ts";
 import type { CameraController } from "../scene/camera-controller.ts";
 import type { CullingManager } from "../scene/culling-manager.ts";
 import type { EntityManager } from "../scene/entity-manager.ts";
+import type { InstanceUpload } from "../types/frame-stats.types.ts";
 import type { ShapeMode } from "../types/renderer.types.ts";
 import { CameraUniformBuffer } from "./camera-uniform-buffer.ts";
 import { GpuInstanceBuffers } from "./gpu-buffer-sync.ts";
 import type { GpuContext } from "./gpu-context.ts";
+import { shaderStage } from "./gpu-flags.ts";
 import { createInstancedPipeline } from "./instanced-pipeline.ts";
 import { INSTANCED_QUAD_WGSL } from "./shaders/instanced-quad.wgsl.ts";
+import { UploadMeter } from "./upload-meter.ts";
 
 const IDENTITY_MATRIX = new Float32Array([
   1, 0, 0, 0,
@@ -34,10 +37,14 @@ export class InstancedRenderer {
   private readonly shaderModule: GPUShaderModule;
   private readonly pipelineLayout: GPUPipelineLayout;
   private readonly pipelines = new Map<ShapeMode, GPURenderPipeline>();
+  private readonly uploadMeter = new UploadMeter();
   private shapeMode: ShapeMode;
   private pipeline: GPURenderPipeline;
   /** Whether the instance buffers currently hold a culled subset, not the dense arrays. */
   private holdsCulledSubset = false;
+  /** Visible / active counts of the culled subset the buffers hold. */
+  private culledVisibleCount = 0;
+  private culledActiveCount = 0;
 
   constructor(
     gpuContext: GpuContext,
@@ -48,14 +55,14 @@ export class InstancedRenderer {
     const { device } = gpuContext;
 
     this.quadGeometry = new QuadGeometry(device);
-    this.instanceBuffers = new GpuInstanceBuffers(device, initialCapacity);
+    this.instanceBuffers = new GpuInstanceBuffers(device, initialCapacity, this.uploadMeter);
 
     const cameraLayout = device.createBindGroupLayout({
       label: "camera-bind-group-layout",
       entries: [
         {
           binding: 0,
-          visibility: GPUShaderStage.VERTEX,
+          visibility: shaderStage().VERTEX,
           buffer: { type: "uniform" },
         },
       ],
@@ -101,10 +108,19 @@ export class InstancedRenderer {
   }
 
   /**
+   * The instance-buffer writes made by the last `render` / `renderCulled`
+   * call (empty when nothing was uploaded).
+   */
+  getLastFrameUploads(): readonly InstanceUpload[] {
+    return this.uploadMeter.getUploads();
+  }
+
+  /**
    * Uploads the current entity data and draws one frame.
    * Returns the number of instances drawn.
    */
   render(entityManager: EntityManager): number {
+    this.uploadMeter.beginFrame();
     return this.drawFrame(this.syncDenseEntities(entityManager));
   }
 
@@ -113,25 +129,41 @@ export class InstancedRenderer {
    * the camera frustum. Returns the number of instances drawn.
    *
    * When every entity is visible it takes the regular dirty-tracked path, so a
-   * fully on-screen, unchanged scene uploads nothing.
+   * fully on-screen, unchanged scene uploads nothing. A partially visible
+   * scene is re-culled and re-uploaded only when the camera or the entities
+   * changed, so an unchanged zoomed-in frame uploads nothing either.
    */
   renderCulled(
     entityManager: EntityManager,
     cameraController: CameraController,
     cullingManager: CullingManager,
   ): number {
-    cameraController.syncIfDirty(this);
-    const visibleCount = cullingManager.cullEntities(entityManager, cameraController);
+    this.uploadMeter.beginFrame();
+    const cameraChanged = cameraController.syncIfDirty(this);
     const activeCount = entityManager.getActiveCount();
+    const dirtyTracker = entityManager.getDirtyTracker();
 
+    const culledSubsetIsCurrent =
+      this.holdsCulledSubset &&
+      !cameraChanged &&
+      activeCount === this.culledActiveCount &&
+      dirtyTracker.isClean(activeCount);
+    if (culledSubsetIsCurrent) {
+      return this.drawFrame(this.culledVisibleCount);
+    }
+
+    const visibleCount = cullingManager.cullEntities(entityManager, cameraController);
     if (visibleCount === activeCount) {
       return this.drawFrame(this.syncDenseEntities(entityManager));
     }
 
-    if (visibleCount > 0) {
-      this.holdsCulledSubset = true;
-      this.instanceBuffers.syncFromVisibleViews(cullingManager.getVisibleViews());
-    }
+    this.instanceBuffers.syncFromVisibleViews(cullingManager.getVisibleViews());
+    this.holdsCulledSubset = true;
+    this.culledVisibleCount = visibleCount;
+    this.culledActiveCount = activeCount;
+    // The subset was just rebuilt from current data, and returning to the
+    // dense path re-sends everything, so pending dirty ranges are obsolete.
+    dirtyTracker.clear();
     return this.drawFrame(visibleCount);
   }
 

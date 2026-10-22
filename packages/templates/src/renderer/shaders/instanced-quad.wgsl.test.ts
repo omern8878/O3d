@@ -34,4 +34,14 @@ describe("instanced shape shader", () => {
   it("keeps the opaque quad output as the fallback", () => {
     assert.match(INSTANCED_QUAD_WGSL, /return vec4<f32>\(in\.color, 1\.0\);/);
   });
+
+  it("billboards each quad: the corner offset is added in clip space, scaled per screen axis", () => {
+    assert.match(INSTANCED_QUAD_WGSL, /let center = m \* vec4<f32>\(instance_pos, 1\.0\);/);
+    assert.match(INSTANCED_QUAD_WGSL, /length\(vec3<f32>\(m\[0\]\.x, m\[1\]\.x, m\[2\]\.x\)\)/);
+    assert.match(INSTANCED_QUAD_WGSL, /length\(vec3<f32>\(m\[0\]\.y, m\[1\]\.y, m\[2\]\.y\)\)/);
+    assert.match(
+      INSTANCED_QUAD_WGSL,
+      /center\.xy \+ local_pos \* instance_scale\.xy \* axis_scale,\s*center\.zw,/,
+    );
+  });
 });
