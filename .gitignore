@@ -27,3 +27,4 @@ rustc-ice-*.txt
 node_modules/
 dist/
 packages/engine/pkg/
+.vscode/
