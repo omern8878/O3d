@@ -34,6 +34,11 @@ const MAX_INITIAL_CAPACITY: usize = 1 << 22;
 /// Returned by `remove_entity` when no remaining dense slot was overwritten.
 const NO_SLOT_OVERWRITTEN: isize = -1;
 
+/// Most entities one `allocate_entities` call creates (16,777,216). Not a
+/// scene limit (call again for more): it keeps one JS-supplied count from
+/// requesting more memory than wasm32 can address, which would trap.
+const MAX_BATCH_ALLOCATION: usize = 1 << 24;
+
 const DEFAULT_POSITION: [f32; 3] = [0.0, 0.0, 0.0];
 const DEFAULT_SCALE: [f32; 3] = [1.0, 1.0, 1.0];
 const DEFAULT_COLOR: [f32; 3] = [0.0, 0.0, 0.0];
@@ -82,6 +87,16 @@ impl EntityBuffer {
         Self::write_vec3(&mut self.colors, dense_idx, DEFAULT_COLOR);
 
         entity_id
+    }
+
+    /// Creates `count` entities with default attributes and returns their IDs.
+    ///
+    /// They occupy the dense indices directly after the current active
+    /// entities, in order, so JS can fill them with one contiguous write per
+    /// attribute. At most 16,777,216 are created per call.
+    pub fn allocate_entities(&mut self, count: usize) -> Vec<u32> {
+        let count = count.min(MAX_BATCH_ALLOCATION);
+        (0..count).map(|_| self.allocate_entity() as u32).collect()
     }
 
     /// Destroys an entity, keeping the arrays gap-free. Invalid IDs are ignored.

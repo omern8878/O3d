@@ -14,6 +14,7 @@ export { GpuInstanceBuffers } from "./renderer/gpu-buffer-sync.ts";
 export { QuadGeometry } from "./geometry/quad-geometry.ts";
 export type {
   ColorInput,
+  EntityAttributeArrays,
   EntityId,
   EntityTransform,
   Vec3,

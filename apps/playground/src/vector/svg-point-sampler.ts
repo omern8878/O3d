@@ -1,5 +1,5 @@
 import { allocateByWeight } from './point-budget.ts'
-import type { PointLayer, SvgPointCloud } from './point-cloud.types.ts'
+import type { PointLayer, SvgPointCloud } from '../cloud/point-cloud.types.ts'
 import { ReliefHeightmap } from './relief-heightmap.ts'
 import { createSeededRandom } from './seeded-random.ts'
 import { ShapeGeometry } from './shape-geometry.ts'
@@ -162,9 +162,11 @@ function sampleShape(
     outlineCount += fillCount - placed
   }
 
-  const rim = shape.fill ? rimColor(shape.fill) : shape.stroke!
-  const strokeWidth = shape.fill ? 0 : shape.strokeWidth
-  const size = shape.fill
+  // A stroke paints the outline in its own colour and width; otherwise a
+  // filled shape gets a lightened rim of its fill.
+  const rim = shape.stroke ?? rimColor(shape.fill!)
+  const strokeWidth = shape.stroke ? shape.strokeWidth : 0
+  const size = shape.fill && !shape.stroke
     ? fillSpacing * OUTLINE_POINT_SIZE
     : Math.max(strokeWidth * STROKE_POINT_SIZE, fillSpacing * OUTLINE_POINT_SIZE * 0.6)
   for (const [x, y, nx, ny] of geometry.sampleOutline(outlineCount, shape.fill !== null)) {

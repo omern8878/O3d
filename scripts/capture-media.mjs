@@ -44,10 +44,10 @@ try {
 async function captureStills() {
   const page = await openShowcase(VIEWPORT);
 
-  // 2D: the eyes sit at about (640, 270) in the default 1280 x 800 framing.
+  // 2D: the eyes sit at about (545, 258) and (655, 258) in the default 1280 x 800 framing.
   await page.click("[data-testid=camera-ortho2d]");
   await settle(page, 1200);
-  await page.mouse.click(612, 272); // pick the left eye
+  await page.mouse.click(545, 258); // pick the left eye
   await settle(page, 330);
   await shot(page, "cat-2d-ortho.png");
 

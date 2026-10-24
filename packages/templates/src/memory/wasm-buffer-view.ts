@@ -57,6 +57,19 @@ export class WasmBufferView {
     if (partial.z !== undefined) view[offset + 2] = partial.z;
   }
 
+  /**
+   * Copies `values` (whole `x, y, z` triplets) into an attribute starting at
+   * `firstDense`: one bulk copy into Wasm memory.
+   */
+  writeRange(
+    viewType: "position" | "scale" | "color",
+    firstDense: number,
+    values: ArrayLike<number>,
+  ): void {
+    this.syncViewsIfNeeded();
+    this.viewFor(viewType).set(values, firstDense * FLOATS_PER_VEC3);
+  }
+
   /** Full-capacity positions view (for inspection / debugging). */
   getPositionsView(): Float32Array {
     this.syncViewsIfNeeded();

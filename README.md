@@ -10,13 +10,13 @@
 
 | 2D orthographic: crisp vector edges | 3D perspective: volumetric relief |
 |---|---|
-| ![2D orthographic view of the cat, eyes picked and pulsing](docs/media/cat-2d-ortho.png) | ![3D orbit of the cat point cloud](docs/media/cat-3d-orbit.png) |
+| ![2D orthographic view of the cat, pupils picked and pulsing](docs/media/cat-2d-ortho.png) | ![3D orbit of the cat point cloud](docs/media/cat-3d-orbit.png) |
 | **Zoomed in: live frustum culling** | **Built-in competitor benchmark** |
-| ![Zoomed into the face; 26,209 of 50,000 drawn](docs/media/cat-zoomed-culling.png) | ![Benchmark comparison table](docs/media/benchmark-results.png) |
+| ![Zoomed into the face; 26,707 of 50,000 drawn](docs/media/cat-zoomed-culling.png) | ![Benchmark comparison table](docs/media/benchmark-results.png) |
 
 A screen recording of the showcase is also available as [WebM](docs/media/cat-showcase.webm).
 
-In the 2D shot, the HUD lists exactly two GPU writes for that frame: the animated tail's position slice (43.7 KB) and the colour slice of the picked eyes (30.5 KB). The other ~44,000 particles upload **0 bytes**.
+In the 2D shot, the HUD lists exactly two GPU writes for that frame: the animated tail's position slice (43.7 KB) and the colour slice of the picked pupils (8.9 KB). The other ~45,500 particles upload **0 bytes**.
 
 ---
 
@@ -271,6 +271,10 @@ scene.updateNodePosition(b, [25, 15, 0]);
 scene.updateNodeColor(a, [1, 1, 1]);
 scene.removeNode(b); // true if the node existed
 
+// Bulk API for large scenes: one Wasm call and one copy per attribute.
+const ids = scene.addNodes({ positions, scales, colors }); // flat Float32Arrays, 3 values per node
+scene.writeNodeViews(0, { positions: nextFrame });        // overwrite a range; only it is uploaded
+
 canvas.addEventListener("pointerdown", (event) => {
   const hit = scene.pickNodeAtScreen(event.clientX, event.clientY, canvas.getBoundingClientRect());
   if (hit !== null) scene.updateNodeColor(hit, [1, 0, 0]);
@@ -382,12 +386,19 @@ const scene = new SceneTemplate(createHeadlessGpuContext());
 
 ## The Playground
 
-The live playground opens straight into the vector cat showcase:
+The live playground opens on the vector cat. **Drop any `.svg` or `.obj` file anywhere on the page** (or use *Upload SVG / OBJ*) and it imports automatically:
 
-- **Vector → particles.** A layered SVG (body, chest, ears with pink insides, curled tail, emerald eyes with vertical pupils, nose, mouth, whiskers) is parsed and sampled into 20k / 50k / 100k particles. Dense contour samples give razor-sharp edges, low-discrepancy fill samples give solid interiors, and a stacked relief height field gives each layer depth. The result reads as flat vector art in 2D and as a hologram when orbited.
-- **Dirty sub-slice proof.** Every named layer is one contiguous index range. The tail is animated with a travelling wave each frame, and the HUD lists the exact writes: the tail's position slice, and nothing for the static body.
-- **Interact.** Drag to orbit (Shift or right-drag to pan), wheel or pinch to zoom into the face and watch *Visible drawn* fall below *Total entities*. Click or tap any part to raycast-pick it: the HUD shows its `EntityId` and body part, and the part pulses gold.
-- **Controls.** Camera (3D perspective / 2D ortho), shape (SDF circle / quad), particle count, tail animate / freeze, **Upload Custom SVG** (paths, basic shapes, groups, transforms, inline styles, both fill rules), and **Run 100k Benchmark**.
+- **SVG, any style of export.** Paths, rects, circles, ellipses, lines, polylines, polygons, `<use>`, nested groups and transforms. Presentation attributes, inline styles and `<style>` sheets (class, id and tag selectors) resolve in normal cascade order. Gradient fills become their average stop colour, and `currentColor` and unknown paints fall back to visible colours instead of dropping shapes. Stroke-only line art is sampled along its strokes, and all-dark drawings are lifted so they show on the dark background. Without a `viewBox`, bounds come from the geometry. SVGs with text or embedded images, or nothing vectorizable, are rendered by the browser into an offscreen canvas and sampled pixel by pixel.
+- **OBJ, any mesh.** `v` (optionally with vertex colours), `vn`, every face index form (`v`, `v/vt`, `v//vn`, `v/vt/vn`), negative indices, quads and n-gons, and `o` / `g` / `usemtl` groups. Malformed lines are skipped, never fatal. In *Auto* mode, meshes with 50,000+ vertices render their vertices 1:1; lighter meshes are surface-sampled by area (4 points per triangle, 50k–300k). Groups become separately pickable layers, shaded by their normals. Dropping a 3D model switches to the 3D camera at an angle that shows its depth.
+- **Normalized and framed.** Every source is centred and scaled into a canonical `[-10, 10]` cube, and the camera frames its bounding sphere. A fully framed scene also lets the engine skip per-entity culling.
+- **No particle cap.** Choose Auto, 20k, 100k, 250k or 1M, or type any count. Particle size scales with 1/√N, so 5,000 to 1,000,000+ particles stay dense without smearing.
+- **Presets with morphing.** *Cat*, *Teapot* (with rising steam), *Torus knot* and *Galaxy*. The teapot and knot are procedural models written as OBJ text and imported through the same pipeline as a dropped file. Switching scene, particle count or file morphs every particle's position, colour and size over ~600 ms.
+- **Motion modes.**
+  - *Sub-slice* animates one contiguous layer (cat tail, teapot steam, galaxy core, knot segment), and the HUD shows that only its slice uploads.
+  - *3D Wave* moves every particle: the full-buffer stress case, still one write.
+  - *Turntable* orbits the camera: **0 instance bytes**.
+  - *Freeze* stops all motion.
+- **Interact.** Drag to orbit (Shift or right-drag to pan), wheel or pinch to zoom and watch *Visible drawn* fall below *Total entities*. Click any part to raycast-pick it: the HUD shows its `EntityId` and layer, and the layer pulses gold.
 - **Fallback.** Without a WebGPU adapter the same pipeline runs on a headless GPU context and a software rasterizer draws it. The HUD badges the active backend.
 
 ## Development

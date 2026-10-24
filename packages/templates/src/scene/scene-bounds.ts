@@ -19,11 +19,13 @@ export class SceneBounds {
   private hasVolume = false;
   /** Set when some entity could not be bounded (non-finite data). */
   private unbounded = false;
+  /** Set by bulk writes that skipped per-entity tracking. */
+  private stale = false;
   private grownSinceReplace = false;
 
   /** Whether the bounds can be tested (they hold a finite volume). */
   get usable(): boolean {
-    return this.hasVolume && !this.unbounded;
+    return this.hasVolume && !this.unbounded && !this.stale;
   }
 
   /** Whether the volume grew since the last exact recompute. */
@@ -31,8 +33,18 @@ export class SceneBounds {
     return this.grownSinceReplace;
   }
 
+  /**
+   * Marks the bounds out of date after a bulk write, so the next test
+   * recomputes them in one Wasm pass instead of tracking every entity in JS.
+   */
+  invalidate(): void {
+    this.stale = true;
+    this.grownSinceReplace = true;
+  }
+
   /** Widens the bounds to cover a sphere of `radius` at `(x, y, z)`. */
   include(x: number, y: number, z: number, radius: number): void {
+    if (this.stale) return;
     if (![x, y, z, radius].every(Number.isFinite)) {
       this.unbounded = true;
       this.grownSinceReplace = true;
@@ -75,6 +87,7 @@ export class SceneBounds {
   replace(values: ArrayLike<number>): void {
     this.grownSinceReplace = false;
     this.unbounded = false;
+    this.stale = false;
     if (values.length !== SCENE_BOUNDS_FLOATS) {
       this.hasVolume = false;
       this.unbounded = values.length !== 0;

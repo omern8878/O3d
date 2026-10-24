@@ -9,9 +9,9 @@ export function createSegmentedControl<T extends string>(
   label: string,
   testId: string,
   options: readonly SegmentOption<T>[],
-  initial: T,
+  initial: T | null,
   onChange: (value: T) => void,
-): { element: HTMLElement; set(value: T): void } {
+): { element: HTMLElement; set(value: T | null): void } {
   const row = document.createElement('div')
   row.className = 'control-row'
   const caption = document.createElement('span')
@@ -35,7 +35,8 @@ export function createSegmentedControl<T extends string>(
     return { value, button }
   })
 
-  function set(value: T): void {
+  /** Highlights `value`; `null` (or any value not listed) highlights nothing. */
+  function set(value: T | null): void {
     for (const entry of buttons) {
       const active = entry.value === value
       entry.button.classList.toggle('active', active)

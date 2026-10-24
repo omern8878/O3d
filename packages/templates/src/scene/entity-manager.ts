@@ -2,7 +2,7 @@ import { CullingBuffer, EntityBuffer, wasm_memory } from "@engine/core/pkg/engin
 import { DirtyTracker } from "../memory/dirty-tracker.ts";
 import { FLOATS_PER_VEC3 } from "../memory/vec3-layout.ts";
 import { WasmBufferView } from "../memory/wasm-buffer-view.ts";
-import type { EntityId, EntityTransform } from "../types/entity.types.ts";
+import type { EntityAttributeArrays, EntityId, EntityTransform } from "../types/entity.types.ts";
 import type { ReadonlyRawEntityViews } from "../types/readonly-buffer.types.ts";
 import { parseColor } from "../utils/color.utils.ts";
 import { SceneBounds } from "./scene-bounds.ts";
@@ -44,6 +44,62 @@ export class EntityManager {
       this.includeInBounds(denseIdx);
     }
     return id;
+  }
+
+  /**
+   * Creates `count` entities at once and returns their IDs. They occupy the
+   * dense indices right after the existing entities, so `data` (three numbers
+   * per entity per attribute) is copied in one bulk write per attribute.
+   *
+   * @throws {RangeError} if an array in `data` does not hold exactly `count` triplets.
+   */
+  createEntities(count: number, data: EntityAttributeArrays = {}): Uint32Array {
+    for (const values of [data.positions, data.scales, data.colors]) {
+      if (values && values.length !== count * FLOATS_PER_VEC3) {
+        throw new RangeError(`Expected ${count * FLOATS_PER_VEC3} values, got ${values.length}.`);
+      }
+    }
+    const ids = this.buffer.allocate_entities(Math.max(0, Math.floor(count)));
+    if (ids.length === 0) {
+      return ids;
+    }
+    const first = this.buffer.get_dense_index(ids[0]!)!;
+    const last = first + ids.length - 1;
+    for (const channel of ["position", "scale", "color"] as const) {
+      this.dirtyTracker.markRangeDirty(channel, first, last);
+    }
+    this.writeRange(first, data);
+    this.bounds.invalidate();
+    return ids;
+  }
+
+  /**
+   * Overwrites consecutive entities starting at dense index `firstDense`
+   * (the order of {@link EntityManager.getRawViews}) with one bulk copy per
+   * attribute, marking exactly that range dirty.
+   *
+   * @throws {RangeError} if the range does not fit the active entities or an
+   * array is not a whole number of triplets.
+   */
+  writeRange(firstDense: number, data: EntityAttributeArrays): void {
+    const channels = [
+      ["position", data.positions],
+      ["scale", data.scales],
+      ["color", data.colors],
+    ] as const;
+    for (const [channel, values] of channels) {
+      if (!values || values.length === 0) continue;
+      const count = values.length / FLOATS_PER_VEC3;
+      if (!Number.isInteger(firstDense) || firstDense < 0 || !Number.isInteger(count) ||
+          firstDense + count > this.buffer.active_count()) {
+        throw new RangeError(`Cannot write ${values.length} values at dense index ${firstDense}.`);
+      }
+      this.view.writeRange(channel, firstDense, values);
+      this.dirtyTracker.markRangeDirty(channel, firstDense, firstDense + count - 1);
+    }
+    if (data.positions?.length || data.scales?.length) {
+      this.bounds.invalidate();
+    }
   }
 
   /** Whether `id` refers to a live entity. */

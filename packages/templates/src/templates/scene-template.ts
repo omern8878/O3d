@@ -4,7 +4,7 @@ import { EntityManager } from "../scene/entity-manager.ts";
 import { PickingController } from "../scene/picking-controller.ts";
 import { GpuContext } from "../renderer/gpu-context.ts";
 import { InstancedRenderer } from "../renderer/instanced-renderer.ts";
-import type { EntityId, Vec3Tuple } from "../types/entity.types.ts";
+import type { EntityAttributeArrays, EntityId, Vec3Tuple } from "../types/entity.types.ts";
 import type { FrameStats } from "../types/frame-stats.types.ts";
 import type { ViewportRect } from "../types/picking.types.ts";
 import type { ReadonlyRawEntityViews } from "../types/readonly-buffer.types.ts";
@@ -83,6 +83,35 @@ export class SceneTemplate {
       scale: toVec3(scale),
       color: toColor(color),
     });
+  }
+
+  /**
+   * Adds many nodes at once from flat arrays (`x, y, z` per node for
+   * positions and scales, `r, g, b` for colors) and returns their IDs in
+   * order. Far faster than repeated {@link SceneTemplate.addNode} for large
+   * scenes: one Wasm call and one bulk copy per attribute.
+   *
+   * @throws {RangeError} if `positions` is not whole triplets, or `scales` /
+   * `colors` do not match its length.
+   */
+  addNodes(nodes: EntityAttributeArrays & { positions: ArrayLike<number> }): Uint32Array {
+    const count = nodes.positions.length / 3;
+    if (!Number.isInteger(count)) {
+      throw new RangeError("positions must hold x, y, z for every node.");
+    }
+    return this.entities.createEntities(count, nodes);
+  }
+
+  /**
+   * Overwrites consecutive nodes starting at view index `start`: the same
+   * indexing as {@link SceneTemplate.getNodeViews}, which is insertion order
+   * until a node is removed. Only the written range is uploaded next frame.
+   * Use it to animate whole groups of nodes (morphs, waves) with one copy.
+   *
+   * @throws {RangeError} if the range does not fit the scene's nodes.
+   */
+  writeNodeViews(start: number, nodes: EntityAttributeArrays): void {
+    this.entities.writeRange(start, nodes);
   }
 
   /** Moves a node. Unknown IDs are ignored. */

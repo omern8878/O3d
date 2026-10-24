@@ -1,40 +1,53 @@
 import type { SceneCameraMode, SceneTemplate } from '@engine/templates'
 
-/** Eye distance: the 200-unit-tall cat fills ~75% of a 45 degree view. */
-const EYE_DISTANCE = 320
-/** Aim at the middle of the relief so orbits pivot through the cat's volume. */
-const TARGET_DEPTH = 20
-const ORTHO_HALF_HEIGHT = 118
-const SWAY_AMPLITUDE_RAD = 0.55
+/** Half the engine camera's 45 degree vertical field of view. */
+const HALF_FOV_Y = Math.PI / 8
+/** Breathing room around the scene's bounding sphere. */
+const FIT_MARGIN = 1.08
+/** Sources are normalized into [-10, 10], so this is the radius when none is given. */
+const DEFAULT_RADIUS = 10
+const SWAY_AMPLITUDE_RAD = 0.5
 const SWAY_PERIOD_S = 14
-const INITIAL_ELEVATION_RAD = 0.12
+const TURNTABLE_RAD_PER_S = 0.45
+
+/** Starting view angles for a 3D camera, in radians. */
+export type OrbitAngles = { azimuth: number; elevation: number }
+
+export const DEFAULT_3D_ANGLES: OrbitAngles = { azimuth: 0, elevation: 0.12 }
+/** The view a dropped 3D model opens with, so its depth reads immediately. */
+export const MODEL_3D_ANGLES: OrbitAngles = { azimuth: 0.6, elevation: 0.35 }
 
 /**
- * Camera presets for the showcase plus a gentle idle sway in 3D, which stops
- * for good once the user takes control.
+ * Camera presets for canonical space, a gentle idle sway in 3D (which stops
+ * once the user takes control) and a turntable mode.
  */
 export class CameraRig {
   private swayOffset = 0
   private swaying = true
-  /** When the current sway began, so it always starts from the preset angle. */
   private swayStart: number | null = null
 
-  /** Resets the view for `mode`: front-on in 2D, slightly from above in 3D. */
-  apply(scene: SceneTemplate, mode: SceneCameraMode): void {
+  /**
+   * Resets the view for `mode`, framing a scene of bounding-sphere `radius`
+   * around the origin: front-on in 2D, at `angles` in 3D. A view that
+   * contains the whole sphere also lets the engine skip per-entity culling.
+   */
+  apply(
+    scene: SceneTemplate,
+    mode: SceneCameraMode,
+    angles: OrbitAngles = DEFAULT_3D_ANGLES,
+    radius = DEFAULT_RADIUS,
+  ): void {
     const camera = scene.getCameraController()
+    const distance = (radius * FIT_MARGIN) / Math.sin(HALF_FOV_Y)
     scene.setCameraMode(mode)
-    camera.setTarget(0, 0, mode === 'perspective3d' ? TARGET_DEPTH : 0)
-    camera.setPosition(0, 0, EYE_DISTANCE)
+    camera.setTarget(0, 0, 0)
+    camera.setPosition(0, 0, distance)
     this.swayOffset = 0
     this.swayStart = null
-    if (mode === 'ortho2d') {
-      camera.setOrthoHalfHeight(ORTHO_HALF_HEIGHT)
-    } else {
-      camera.orbit(0, INITIAL_ELEVATION_RAD)
-    }
+    if (mode === 'ortho2d') camera.setOrthoHalfHeight(radius * FIT_MARGIN)
+    else camera.orbit(angles.azimuth, angles.elevation)
   }
 
-  /** Stops the idle sway (called on the first drag, pinch or wheel). */
   stopSway(): void {
     this.swaying = false
   }
@@ -43,14 +56,20 @@ export class CameraRig {
     this.swaying = true
   }
 
-  /** Advances the idle sway; only moves a 3D camera. */
+  /** Idle sway: a slow back-and-forth orbit, 3D only. */
   update(scene: SceneTemplate, timeSeconds: number): void {
     const camera = scene.getCameraController()
     if (!this.swaying || camera.getMode() !== '3d') return
     this.swayStart ??= timeSeconds
-    const phase = ((timeSeconds - this.swayStart) / SWAY_PERIOD_S) * 2 * Math.PI
-    const next = Math.sin(phase) * SWAY_AMPLITUDE_RAD
+    const next = Math.sin(((timeSeconds - this.swayStart) / SWAY_PERIOD_S) * 2 * Math.PI) * SWAY_AMPLITUDE_RAD
     camera.orbit(next - this.swayOffset, 0)
     this.swayOffset = next
+  }
+
+  /** Turntable: a steady orbit (2D views turn into 3D). Moves only the camera: 0 instance bytes. */
+  turntable(scene: SceneTemplate, deltaSeconds: number, radius = DEFAULT_RADIUS): void {
+    const camera = scene.getCameraController()
+    if (camera.getMode() !== '3d') this.apply(scene, 'perspective3d', DEFAULT_3D_ANGLES, radius)
+    camera.orbit(TURNTABLE_RAD_PER_S * deltaSeconds, 0)
   }
 }

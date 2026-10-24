@@ -34,6 +34,12 @@ export class DirtyTracker {
     this.max[channel] = Math.max(this.max[channel], denseIdx);
   }
 
+  /** Widens the channel's dirty interval to include `first ..= last`. */
+  markRangeDirty(channel: ChannelType, first: number, last: number): void {
+    this.markDirty(channel, first);
+    this.markDirty(channel, last);
+  }
+
   /** Marks `denseIdx` dirty on every channel. */
   markAllChannelsDirty(denseIdx: number): void {
     for (const channel of CHANNELS) {

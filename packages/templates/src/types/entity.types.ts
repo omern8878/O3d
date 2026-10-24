@@ -19,3 +19,15 @@ export type EntityTransform = {
   scale?: Partial<Vec3>;
   color?: ColorInput;
 };
+
+/**
+ * Attributes of consecutive entities as flat `x, y, z` / `r, g, b` triplets
+ * (e.g. `Float32Array`s): three numbers per entity. Omitted arrays are left
+ * untouched (or at their defaults for new entities).
+ */
+export type EntityAttributeArrays = {
+  positions?: ArrayLike<number>;
+  scales?: ArrayLike<number>;
+  /** Each channel in `0..1`. */
+  colors?: ArrayLike<number>;
+};

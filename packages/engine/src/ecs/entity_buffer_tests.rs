@@ -182,3 +182,34 @@ fn entity_id_at_dense_follows_swap_and_pop_and_ignores_inactive_slots() {
     assert_eq!(buf.entity_id_at_dense(2), None);
     assert_eq!(buf.entity_id_at_dense(usize::MAX), None);
 }
+
+#[test]
+fn allocate_entities_appends_a_contiguous_dense_block_with_defaults() {
+    let mut buf = EntityBuffer::new(2);
+    let first = buf.allocate_entity();
+
+    let ids = buf.allocate_entities(5);
+
+    assert_eq!(ids.len(), 5);
+    assert_eq!(buf.active_count(), 6);
+    for (offset, &id) in ids.iter().enumerate() {
+        let idx = buf.get_dense_index(id as usize).unwrap();
+        assert_eq!(idx, offset + 1, "dense indices follow the existing entity");
+        assert_eq!(vec3_at(&buf.scales, idx), DEFAULT_SCALE);
+    }
+    assert_ne!(ids[0] as usize, first);
+    assert!(buf.capacity() >= 6, "grew past the initial capacity");
+}
+
+#[test]
+fn allocate_entities_reuses_freed_ids_and_accepts_zero() {
+    let mut buf = EntityBuffer::new(4);
+    let ids = buf.allocate_entities(3);
+    buf.remove_entity(ids[1] as usize);
+
+    assert!(buf.allocate_entities(0).is_empty());
+    let again = buf.allocate_entities(1);
+
+    assert_eq!(again, vec![ids[1]], "the freed ID comes back first");
+    assert_eq!(buf.get_dense_index(again[0] as usize), Some(2));
+}

@@ -1,36 +1,39 @@
 import type { FrameStats, InstanceUpload, SceneCameraMode, ShapeMode } from '@engine/templates'
+import type { ParticleRequest } from '../cloud/point-cloud.types.ts'
+import type { PresetId } from '../presets/preset-catalog.ts'
 import { createSegmentedControl } from './segmented-control.ts'
 import { formatBytes, formatCount, formatMs } from './format.ts'
 
-export type ParticleCount = 20_000 | 50_000 | 100_000
+/** What moves each frame: one layer, everything, the camera, or nothing. */
+export type AnimationMode = 'slice' | 'wave' | 'turntable' | 'freeze'
 
 export type HudSettings = {
+  /** `null` while a dropped or uploaded file is shown. */
+  preset: PresetId | null
   cameraMode: SceneCameraMode
   shapeMode: ShapeMode
-  count: ParticleCount
-  animateTail: boolean
+  particles: ParticleRequest
+  animation: AnimationMode
 }
 
 export type HudHandlers = {
+  onPreset(preset: PresetId): void
   onCameraMode(mode: SceneCameraMode): void
   onShapeMode(mode: ShapeMode): void
-  onParticleCount(count: ParticleCount): void
-  onAnimateTail(animate: boolean): void
-  onUploadSvg(file: File): void
-  onRestoreCat(): void
+  onParticles(request: ParticleRequest): void
+  onAnimation(mode: AnimationMode): void
+  onUpload(file: File): void
   onResetView(): void
   onRunBenchmark(): void
 }
 
 /** Per-frame numbers the HUD shows. */
-export type HudTelemetry = {
-  fps: number
-  frameMs: number
-  stats: FrameStats
-}
+export type HudTelemetry = { fps: number; frameMs: number; stats: FrameStats }
 
 const BYTES_PER_VEC3 = 12
 const REFRESH_INTERVAL_MS = 150
+const PARTICLE_CHOICES = ['auto', '20000', '100000', '250000', '1000000'] as const
+type ParticleChoice = (typeof PARTICLE_CHOICES)[number]
 
 /**
  * The heads-up display: live telemetry (including the exact instance-buffer
@@ -41,11 +44,12 @@ export class Hud {
   private readonly values: Record<string, HTMLElement> = {}
   private readonly uploadList: HTMLElement
   private readonly sourceLabel: HTMLElement
-  private readonly restoreButton: HTMLButtonElement
+  private readonly sourceDetail: HTMLElement
   private readonly status: HTMLElement
+  private readonly customParticles: HTMLInputElement
   private readonly controls: { set(settings: HudSettings): void }
   private lastRefresh = 0
-  private tailRange: [number, number] | null = null
+  private slice: { name: string; first: number; last: number } | null = null
 
   constructor(container: HTMLElement, settings: HudSettings, handlers: HudHandlers) {
     this.root = document.createElement('aside')
@@ -54,14 +58,11 @@ export class Hud {
 
     const header = document.createElement('header')
     header.className = 'hud-header'
-    header.innerHTML = `<div><h1>O3d <span>Vector Cat</span></h1><p>Rust · Wasm · WebGPU</p></div>`
+    header.innerHTML = '<div><h1>O3d <span>Particles</span></h1><p>Rust · Wasm · WebGPU</p></div>'
     const badge = this.element('span', 'badge', 'backend')
-    const collapse = document.createElement('button')
-    collapse.type = 'button'
+    const collapse = this.button('▾', 'collapse', () => this.root.classList.toggle('collapsed'))
     collapse.className = 'collapse'
     collapse.setAttribute('aria-label', 'Collapse panel')
-    collapse.textContent = '▾'
-    collapse.addEventListener('click', () => this.root.classList.toggle('collapsed'))
     header.append(badge, collapse)
 
     const telemetry = document.createElement('dl')
@@ -86,11 +87,23 @@ export class Hud {
 
     const source = document.createElement('div')
     source.className = 'source-row'
-    this.sourceLabel = document.createElement('span')
-    this.restoreButton = this.button('Use built-in cat', 'restore-cat', handlers.onRestoreCat)
-    this.restoreButton.classList.add('link')
-    source.append(this.sourceLabel, this.restoreButton)
+    this.sourceLabel = document.createElement('strong')
+    this.sourceDetail = document.createElement('span')
+    this.sourceDetail.dataset.testid = 'source-detail'
+    source.append(this.sourceLabel, this.sourceDetail)
 
+    const preset = createSegmentedControl<PresetId>('Scene', 'preset', [
+      { value: 'cat', label: 'Cat' },
+      { value: 'teapot', label: 'Teapot' },
+      { value: 'knot', label: 'Knot' },
+      { value: 'galaxy', label: 'Galaxy' },
+    ], settings.preset, handlers.onPreset)
+    const animation = createSegmentedControl<AnimationMode>('Motion', 'animation', [
+      { value: 'slice', label: 'Sub-slice' },
+      { value: 'wave', label: '3D Wave' },
+      { value: 'turntable', label: 'Turntable' },
+      { value: 'freeze', label: 'Freeze' },
+    ], settings.animation, handlers.onAnimation)
     const camera = createSegmentedControl<SceneCameraMode>('Camera', 'camera', [
       { value: 'perspective3d', label: '3D Perspective' },
       { value: 'ortho2d', label: '2D Ortho' },
@@ -99,38 +112,50 @@ export class Hud {
       { value: 'circle', label: 'SDF Circle' },
       { value: 'quad', label: 'Quad' },
     ], settings.shapeMode, handlers.onShapeMode)
-    const count = createSegmentedControl<`${ParticleCount}`>('Particles', 'count', [
+    const particles = createSegmentedControl<ParticleChoice>('Particles', 'count', [
+      { value: 'auto', label: 'Auto' },
       { value: '20000', label: '20k' },
-      { value: '50000', label: '50k' },
       { value: '100000', label: '100k' },
-    ], `${settings.count}`, (value) => handlers.onParticleCount(Number(value) as ParticleCount))
-    const tail = createSegmentedControl<'on' | 'off'>('Tail', 'tail', [
-      { value: 'on', label: 'Animate' },
-      { value: 'off', label: 'Freeze' },
-    ], settings.animateTail ? 'on' : 'off', (value) => handlers.onAnimateTail(value === 'on'))
+      { value: '250000', label: '250k' },
+      { value: '1000000', label: '1M' },
+    ], choiceOf(settings.particles), (choice) => {
+      this.customParticles.value = ''
+      handlers.onParticles(choice === 'auto' ? 'auto' : Number(choice))
+    })
+    this.customParticles = Object.assign(document.createElement('input'), {
+      type: 'number', min: '1', step: '1000', placeholder: 'Custom count (no limit)',
+    })
+    this.customParticles.className = 'custom-count'
+    this.customParticles.dataset.testid = 'count-custom'
+    this.customParticles.addEventListener('change', () => {
+      const count = Math.floor(Number(this.customParticles.value))
+      if (!(count > 0)) return
+      particles.set(choiceOf(count))
+      handlers.onParticles(count)
+    })
     this.controls = {
       set: (s) => {
+        preset.set(s.preset)
+        animation.set(s.animation)
         camera.set(s.cameraMode)
         shape.set(s.shapeMode)
-        count.set(`${s.count}`)
-        tail.set(s.animateTail ? 'on' : 'off')
+        particles.set(choiceOf(s.particles))
       },
     }
 
-    const fileInput = document.createElement('input')
-    fileInput.type = 'file'
-    fileInput.accept = '.svg,image/svg+xml'
-    fileInput.hidden = true
-    fileInput.dataset.testid = 'svg-file-input'
+    const fileInput = Object.assign(document.createElement('input'), {
+      type: 'file', accept: '.svg,.obj,image/svg+xml,model/obj', hidden: true,
+    })
+    fileInput.dataset.testid = 'file-input'
     fileInput.addEventListener('change', () => {
       const file = fileInput.files?.[0]
-      if (file) handlers.onUploadSvg(file)
+      if (file) handlers.onUpload(file)
       fileInput.value = ''
     })
     const actions = document.createElement('div')
     actions.className = 'actions'
     actions.append(
-      this.button('Upload Custom SVG', 'upload-svg', () => fileInput.click()),
+      this.button('Upload SVG / OBJ', 'upload-file', () => fileInput.click()),
       this.button('Reset View', 'reset-view', handlers.onResetView),
       fileInput,
     )
@@ -140,11 +165,12 @@ export class Hud {
     this.status = this.element('p', 'status', 'status')
     const hint = document.createElement('p')
     hint.className = 'hint'
-    hint.textContent = 'Drag to orbit · Shift / right-drag to pan · Wheel or pinch to zoom · Click a part to pick it'
+    hint.textContent = 'Drop any .svg or .obj on the page · Drag to orbit · Shift / right-drag to pan · Wheel or pinch to zoom · Click to pick'
 
     const controls = document.createElement('section')
     controls.className = 'controls'
-    controls.append(camera.element, shape.element, count.element, tail.element, actions, benchmark)
+    controls.append(preset.element, animation.element, camera.element, shape.element, particles.element,
+      this.customParticles, actions, benchmark)
 
     this.root.append(header, telemetry, this.uploadList, source, controls, this.status, hint)
     container.append(this.root)
@@ -162,19 +188,20 @@ export class Hud {
     this.controls.set(settings)
   }
 
-  /** Names the SVG on screen and the tail slice the animation writes. */
-  setSource(label: string, isBuiltIn: boolean, tailRange: [number, number] | null): void {
-    this.sourceLabel.textContent = `Source: ${label}`
-    this.restoreButton.hidden = isBuiltIn
-    this.tailRange = tailRange
+  /** Names the source, how it was built, and the slice the sub-slice animation writes. */
+  setSource(label: string, detail: string, slice: { name: string; start: number; end: number } | null): void {
+    this.sourceLabel.textContent = label
+    this.sourceDetail.textContent = detail
+    this.slice = slice ? { name: slice.name, first: slice.start, last: slice.end - 1 } : null
   }
 
   setPicked(text: string): void {
     this.values.picked!.textContent = text
   }
 
-  setStatus(message: string, isError = false): void {
-    this.status.textContent = message
+  /** A progress or error line; `null` clears it. */
+  setStatus(message: string | null, isError = false): void {
+    this.status.textContent = message ?? ''
     this.status.classList.toggle('error', isError)
   }
 
@@ -197,20 +224,18 @@ export class Hud {
     const lines = uploads.length === 0
       ? ['No instance writes: every static particle uploads 0 B']
       : uploads.map((upload) => this.describeUpload(upload))
-    this.uploadList.replaceChildren(
-      ...lines.map((line) => {
-        const item = document.createElement('li')
-        item.textContent = line
-        return item
-      }),
-    )
+    this.uploadList.replaceChildren(...lines.map((line) => {
+      const item = document.createElement('li')
+      item.textContent = line
+      return item
+    }))
   }
 
   private describeUpload({ channel, byteOffset, byteLength }: InstanceUpload): string {
     const first = byteOffset / BYTES_PER_VEC3
     const last = first + byteLength / BYTES_PER_VEC3 - 1
-    const isTail = this.tailRange !== null && first === this.tailRange[0] && last === this.tailRange[1] - 1
-    return `${channel} [${formatCount(first)}…${formatCount(last)}] ${formatBytes(byteLength)}${isTail ? ' · tail slice' : ''}`
+    const isSlice = this.slice !== null && first === this.slice.first && last === this.slice.last
+    return `${channel} [${formatCount(first)}…${formatCount(last)}] ${formatBytes(byteLength)}${isSlice ? ` · ${this.slice!.name} slice` : ''}`
   }
 
   private element(tag: string, className: string, key: string): HTMLElement {
@@ -229,4 +254,10 @@ export class Hud {
     button.addEventListener('click', onClick)
     return button
   }
+}
+
+/** The segmented choice for a request, or `null` for a custom count. */
+function choiceOf(request: ParticleRequest): ParticleChoice | null {
+  const value = String(request)
+  return (PARTICLE_CHOICES as readonly string[]).includes(value) ? (value as ParticleChoice) : null
 }

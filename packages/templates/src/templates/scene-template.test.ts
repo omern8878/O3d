@@ -314,4 +314,67 @@ describe("SceneTemplate", () => {
 
     assert.equal(memory(), afterFirst);
   });
+
+  describe("bulk node API", () => {
+    it("addNodes creates nodes in view order with their data", () => {
+      const { scene } = createScene({ enableCulling: false });
+      scene.addNode([9, 9, 9], [1, 1, 1], [1, 1, 1]);
+
+      const ids = scene.addNodes({
+        positions: new Float32Array([1, 2, 3, 4, 5, 6]),
+        colors: new Float32Array([0.5, 0, 0, 0, 0.5, 0]),
+      });
+
+      assert.equal(ids.length, 2);
+      assert.equal(scene.getActiveCount(), 3);
+      const views = scene.getNodeViews();
+      assert.deepEqual([...views.positions.subarray(3)], [1, 2, 3, 4, 5, 6]);
+      assert.deepEqual([...views.scales.subarray(3)], [1, 1, 1, 1, 1, 1], "omitted scales keep the defaults");
+      assert.equal(scene.pickNodeByNdc(0, 0), null);
+    });
+
+    it("addNodes uploads the whole new block in one write per channel", () => {
+      const { scene } = createScene({ enableCulling: false });
+      scene.addNodes({ positions: new Float32Array(3 * 1000) });
+
+      scene.renderFrame();
+
+      assert.deepEqual(
+        scene.getFrameStats().uploads.map((u) => [u.channel, u.byteOffset, u.byteLength]),
+        [["position", 0, 12_000], ["scale", 0, 12_000], ["color", 0, 12_000]],
+      );
+    });
+
+    it("writeNodeViews overwrites a range and uploads exactly that slice", () => {
+      const { scene } = createScene({ enableCulling: false });
+      scene.addNodes({ positions: new Float32Array(3 * 10) });
+      scene.renderFrame();
+
+      scene.writeNodeViews(4, { positions: [7, 7, 7, 8, 8, 8] });
+      scene.renderFrame();
+
+      assert.deepEqual([...scene.getNodeViews().positions.subarray(12, 18)], [7, 7, 7, 8, 8, 8]);
+      assert.deepEqual(scene.getFrameStats().uploads, [{ channel: "position", byteOffset: 48, byteLength: 24 }]);
+    });
+
+    it("rejects malformed or out-of-range bulk data", () => {
+      const { scene } = createScene();
+      scene.addNodes({ positions: new Float32Array(6) });
+
+      assert.throws(() => scene.addNodes({ positions: [1, 2] }), RangeError);
+      assert.throws(() => scene.addNodes({ positions: [1, 2, 3], colors: [1, 1] }), RangeError);
+      assert.throws(() => scene.writeNodeViews(1, { positions: [1, 2, 3, 4, 5, 6] }), RangeError);
+      assert.throws(() => scene.writeNodeViews(-1, { colors: [1, 1, 1] }), RangeError);
+      assert.equal(scene.getActiveCount(), 2);
+    });
+
+    it("bulk-written nodes still get the culling fast path and exact culling", () => {
+      const { scene } = createScene(); // 2D camera sees x, y in [-100, 100]
+      scene.addNodes({ positions: new Float32Array([0, 0, 0, 10, 10, 0]) });
+      assert.equal(scene.renderFrame(), 2);
+
+      scene.writeNodeViews(1, { positions: [5000, 0, 0] });
+      assert.equal(scene.renderFrame(), 1);
+    });
+  });
 });
