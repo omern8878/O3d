@@ -40,3 +40,19 @@ function expandShorthand(digits: string): string {
 function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
+
+/**
+ * Packs a normalized RGBA color into the `u32` layout the batch buffers use:
+ * red in the lowest byte (`r | g << 8 | b << 16 | a << 24`), which the GPU
+ * reads as `unorm8x4`. Channels are clamped to `0..1`.
+ */
+export function packRgba(r: number, g: number, b: number, a: number = 1): number {
+  const byte = (value: number) => Math.round(clamp01(value) * MAX_CHANNEL);
+  return (byte(r) | (byte(g) << 8) | (byte(b) << 16) | (byte(a) << 24)) >>> 0;
+}
+
+/** {@link packRgba} for any {@link ColorInput}, with a separate alpha. */
+export function packColor(input: ColorInput, alpha: number = 1): number {
+  const [r, g, b] = parseColor(input);
+  return packRgba(r, g, b, alpha);
+}

@@ -12,6 +12,13 @@ export { INSTANCED_QUAD_WGSL } from "./renderer/shaders/instanced-quad.wgsl.ts";
 export { CameraUniformBuffer } from "./renderer/camera-uniform-buffer.ts";
 export { GpuInstanceBuffers } from "./renderer/gpu-buffer-sync.ts";
 export { QuadGeometry } from "./geometry/quad-geometry.ts";
+export { GpuMesh } from "./geometry/gpu-mesh.ts";
+export { InstancedMesh } from "./batch/instanced-mesh.ts";
+export { LineBatch } from "./batch/line-batch.ts";
+export { BatchRenderer } from "./renderer/batch-renderer.ts";
+export { INSTANCED_MESH_WGSL, LINE_BATCH_WGSL } from "./renderer/shaders/batch.wgsl.ts";
+export { cullSpheres, raycastSpheresNdc } from "./scene/sphere-queries.ts";
+export { packColor, packRgba } from "./utils/color.utils.ts";
 export type {
   ColorInput,
   EntityAttributeArrays,
@@ -20,7 +27,16 @@ export type {
   Vec3,
   Vec3Tuple,
 } from "./types/entity.types.ts";
-export type { CameraConfig, CameraMode } from "./types/camera.types.ts";
+export type { CameraConfig, CameraMode, CameraRay } from "./types/camera.types.ts";
+export type { InstancedMeshOptions } from "./batch/instanced-mesh.ts";
+export type { LineBatchOptions } from "./batch/line-batch.ts";
+export type { BatchScene } from "./renderer/batch-renderer.ts";
+export type {
+  BatchFrameStats,
+  InstanceChannel,
+  LineChannel,
+  MeshShading,
+} from "./types/batch.types.ts";
 export type {
   ReadonlyFloat32Array,
   ReadonlyRawEntityViews,

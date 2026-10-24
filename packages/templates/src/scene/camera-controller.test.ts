@@ -197,4 +197,60 @@ describe("CameraController", () => {
     controller.setOrthoHalfHeight(Number.NaN);
     assert.equal(controller.getRawWasmCamera().ortho_half_height(), 40);
   });
+
+  const near = (a: readonly number[], b: readonly number[]) =>
+    a.every((value, i) => Math.abs(value - b[i]!) < 1e-4);
+
+  it("reports the forward vector and unprojects NDC points to rays", () => {
+    const controller = new CameraController({ mode: "3d", position: { x: 0, y: 0, z: 10 } });
+
+    assert.ok(near(controller.getForward(), [0, 0, -1]));
+    const ray = controller.unprojectNdc(0, 0)!;
+    assert.ok(near(ray.origin, [0, 0, 9.9]));
+    assert.ok(near(ray.direction, [0, 0, -1]));
+    assert.equal(controller.unprojectNdc(Number.NaN, 0), null);
+  });
+
+  it("disabling orbit freezes the view until it is re-enabled", () => {
+    const controller = new CameraController({ mode: "3d" });
+    controller.setOrbitEnabled(false);
+    controller.orbit(1, 0.5);
+
+    assert.equal(controller.isOrbitEnabled(), false);
+    assert.ok(near(controller.getForward(), [0, 0, -1]));
+
+    controller.setOrbitEnabled(true);
+    controller.orbit(1, 0);
+    assert.ok(Math.abs(controller.getForward()[0] + Math.sin(1)) < 1e-4);
+  });
+
+  it("orbit locks freeze one angle at a time", () => {
+    const controller = new CameraController({ mode: "3d" });
+    controller.setOrbitLocks(true, false);
+    controller.orbit(1, 0.4);
+
+    const [x, y] = controller.getForward();
+    assert.ok(Math.abs(x) < 1e-5, "azimuth locked");
+    assert.ok(Math.abs(y + Math.sin(0.4)) < 1e-4, "elevation free");
+  });
+
+  it("lockToXYPlane faces the plane, locks orbit, keeps zoom, and marks the camera dirty", () => {
+    const controller = new CameraController({ mode: "3d", position: { x: 6, y: 8, z: 0 } });
+    const renderer = recorder();
+    controller.syncIfDirty(renderer);
+
+    controller.lockToXYPlane(true);
+    assert.equal(controller.syncIfDirty(renderer), true);
+    assert.ok(near(controller.getForward(), [0, 0, -1]));
+    assert.ok(near(controller.unprojectNdc(0, 0)!.origin, [0, 0, 9.9]), "distance 10 kept");
+
+    controller.orbit(1, 1);
+    assert.ok(near(controller.getForward(), [0, 0, -1]));
+    controller.zoom(0.5);
+    assert.ok(near(controller.unprojectNdc(0, 0)!.origin, [0, 0, 4.9]));
+
+    controller.lockToXYPlane(false);
+    controller.orbit(0.5, 0);
+    assert.ok(Math.abs(controller.getForward()[0]) > 0.1);
+  });
 });

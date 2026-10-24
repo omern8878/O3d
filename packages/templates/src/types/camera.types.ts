@@ -1,4 +1,4 @@
-import type { Vec3 } from "./entity.types.ts";
+import type { Vec3, Vec3Tuple } from "./entity.types.ts";
 
 /** `'2d'` is an orthographic top-down view, `'3d'` a perspective view. */
 export type CameraMode = "2d" | "3d";
@@ -13,3 +13,6 @@ export type CameraConfig = {
   /** World units from the view center to the top edge (2D mode). */
   orthoHalfHeight?: number;
 };
+
+/** A world-space ray `origin + t * direction`, with a unit `direction`. */
+export type CameraRay = { origin: Vec3Tuple; direction: Vec3Tuple };

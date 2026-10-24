@@ -12,6 +12,7 @@ function createNullDevice(): GPUDevice {
   const nullBuffer = (size: number) => ({ size, destroy: () => undefined });
   return {
     createBuffer: ({ size }: GPUBufferDescriptor) => nullBuffer(size),
+    createTexture: () => ({ createView: () => ({}), destroy: () => undefined }),
     createShaderModule: () => ({}),
     createRenderPipeline: () => ({}),
     createBindGroupLayout: () => ({}),
@@ -46,7 +47,7 @@ export function createHeadlessGpuContext(
     format: HEADLESS_FORMAT,
     clearColor,
     context: {
-      getCurrentTexture: () => ({ createView: () => ({}) }),
+      getCurrentTexture: () => ({ createView: () => ({}), width: 1, height: 1 }),
     },
   } as unknown as GpuContext;
 }

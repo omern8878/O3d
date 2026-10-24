@@ -30,7 +30,7 @@ describe("camera uniform flow (real Wasm Camera + EntityManager + InstancedRende
     return { manager, device, renderer, uniformBuffer, camera: new Camera(1.5) };
   }
 
-  const bytes = (writes: { data: Float32Array }[]) =>
+  const bytes = (writes: { data: Float32Array | Uint32Array }[]) =>
     writes.reduce((total, w) => total + w.data.byteLength, 0);
 
   it("initializes the camera uniform with the identity matrix", () => {

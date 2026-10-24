@@ -26,7 +26,7 @@ describe("engine end-to-end guarantees", () => {
   const close = (a: number, b: number) => Math.abs(a - b) < 1e-6;
   const instanceWrites = () => device.writes.filter((w) => w.buffer !== uniformBuffer);
   const uniformWrites = () => device.writes.filter((w) => w.buffer === uniformBuffer);
-  const bytes = (writes: { data: Float32Array }[]) =>
+  const bytes = (writes: { data: Float32Array | Uint32Array }[]) =>
     writes.reduce((total, w) => total + w.data.byteLength, 0);
   const lastPass = () => device.passes[device.passes.length - 1]!;
 

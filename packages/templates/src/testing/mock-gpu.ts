@@ -1,6 +1,7 @@
 /** Minimal in-memory stand-ins for WebGPU, for unit tests that run in Node. */
 
 export type MockBuffer = {
+  label: string | undefined;
   size: number;
   usage: number;
   destroyed: boolean;
@@ -10,7 +11,16 @@ export type MockBuffer = {
 export type MockWrite = {
   buffer: MockBuffer;
   offset: number;
-  data: Float32Array;
+  data: Float32Array | Uint32Array;
+};
+
+export type MockTexture = {
+  descriptor: GPUTextureDescriptor;
+  width: number;
+  height: number;
+  destroyed: boolean;
+  createView(): object;
+  destroy(): void;
 };
 
 /** One recorded call on a mock render pass. */
@@ -23,6 +33,7 @@ export type MockRenderPass = {
 
 export type MockDevice = {
   buffers: MockBuffer[];
+  textures: MockTexture[];
   writes: MockWrite[];
   shaderModules: GPUShaderModuleDescriptor[];
   pipelines: GPURenderPipelineDescriptor[];
@@ -31,7 +42,8 @@ export type MockDevice = {
   bindGroups: GPUBindGroupDescriptor[];
   passes: MockRenderPass[];
   submitCount: number;
-  createBuffer(descriptor: { size: number; usage: number }): MockBuffer;
+  createBuffer(descriptor: { size: number; usage: number; label?: string }): MockBuffer;
+  createTexture(descriptor: GPUTextureDescriptor): MockTexture;
   createShaderModule(descriptor: GPUShaderModuleDescriptor): object;
   createRenderPipeline(descriptor: GPURenderPipelineDescriptor): object;
   createBindGroupLayout(descriptor: GPUBindGroupLayoutDescriptor): object;
@@ -39,7 +51,7 @@ export type MockDevice = {
   createBindGroup(descriptor: GPUBindGroupDescriptor): object;
   createCommandEncoder(): object;
   queue: {
-    writeBuffer(buffer: MockBuffer, offset: number, data: Float32Array): void;
+    writeBuffer(buffer: MockBuffer, offset: number, data: Float32Array | Uint32Array): void;
     submit(commandBuffers: unknown[]): void;
   };
 };
@@ -47,8 +59,9 @@ export type MockDevice = {
 /** Installs the `GPUBufferUsage` / `GPUShaderStage` flags (real values) as globals. */
 export function installMockGpuGlobals(): void {
   Object.assign(globalThis, {
-    GPUBufferUsage: { COPY_DST: 0x08, VERTEX: 0x20, UNIFORM: 0x40 },
+    GPUBufferUsage: { COPY_DST: 0x08, INDEX: 0x10, VERTEX: 0x20, UNIFORM: 0x40 },
     GPUShaderStage: { VERTEX: 0x1, FRAGMENT: 0x2 },
+    GPUTextureUsage: { RENDER_ATTACHMENT: 0x10 },
   });
 }
 
@@ -66,11 +79,13 @@ function recordingProxy(calls: MockPassCall[]): object {
 
 export function createMockDevice(): GPUDevice & MockDevice {
   const buffers: MockBuffer[] = [];
+  const textures: MockTexture[] = [];
   const writes: MockWrite[] = [];
   const passes: MockRenderPass[] = [];
 
   const device: MockDevice = {
     buffers,
+    textures,
     writes,
     shaderModules: [],
     pipelines: [],
@@ -79,8 +94,9 @@ export function createMockDevice(): GPUDevice & MockDevice {
     bindGroups: [],
     passes,
     submitCount: 0,
-    createBuffer({ size, usage }) {
+    createBuffer({ size, usage, label }) {
       const buffer: MockBuffer = {
+        label,
         size,
         usage,
         destroyed: false,
@@ -90,6 +106,21 @@ export function createMockDevice(): GPUDevice & MockDevice {
       };
       buffers.push(buffer);
       return buffer;
+    },
+    createTexture(descriptor) {
+      const { width, height = 1 } = descriptor.size as GPUExtent3DDict;
+      const texture: MockTexture = {
+        descriptor,
+        width,
+        height,
+        destroyed: false,
+        createView: () => ({ texture }),
+        destroy() {
+          texture.destroyed = true;
+        },
+      };
+      textures.push(texture);
+      return texture;
     },
     createShaderModule(descriptor) {
       device.shaderModules.push(descriptor);

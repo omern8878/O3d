@@ -92,4 +92,16 @@ describe("DirtyTracker", () => {
     tracker.clear();
     assert.equal(tracker.isClean(10), true);
   });
+
+  it("tracks custom channel names independently", () => {
+    const tracker = new DirtyTracker(["vertex", "color"] as const);
+    tracker.markRangeDirty("vertex", 3, 5);
+
+    assert.deepEqual(tracker.getRange("vertex", 10), { min: 3, max: 5 });
+    assert.equal(tracker.getRange("color", 10), null);
+    tracker.markAllDirty(4);
+    assert.deepEqual(tracker.getRange("color", 10), { min: 0, max: 3 });
+    tracker.clear();
+    assert.equal(tracker.isClean(10), true);
+  });
 });

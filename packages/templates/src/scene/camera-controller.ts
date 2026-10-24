@@ -1,6 +1,7 @@
 import { Camera, ProjectionMode, wasm_memory } from "@engine/core/pkg/engine.js";
 import type { InstancedRenderer } from "../renderer/instanced-renderer.ts";
-import type { CameraConfig, CameraMode } from "../types/camera.types.ts";
+import type { CameraConfig, CameraMode, CameraRay } from "../types/camera.types.ts";
+import type { Vec3Tuple } from "../types/entity.types.ts";
 import type { ReadonlyFloat32Array } from "../types/readonly-buffer.types.ts";
 
 /** Only the renderer capability the controller needs. */
@@ -86,6 +87,53 @@ export class CameraController {
       (this.wasmCamera.ortho_half_height() * 2) / Math.max(viewportHeight, 1);
     this.wasmCamera.pan_2d(-deltaX * worldPerPixel, deltaY * worldPerPixel);
     this.dirty = true;
+  }
+
+  /**
+   * Enables or disables {@link CameraController.orbit}, e.g. while the pointer
+   * drags an object instead of the view. Pan and zoom keep working.
+   */
+  setOrbitEnabled(enabled: boolean): void {
+    this.wasmCamera.set_orbit_enabled(enabled);
+  }
+
+  isOrbitEnabled(): boolean {
+    return this.wasmCamera.orbit_enabled();
+  }
+
+  /** Freezes the orbit's azimuth (around `+Y`) and / or elevation angle. */
+  setOrbitLocks(lockAzimuth: boolean, lockElevation: boolean): void {
+    this.wasmCamera.set_orbit_locks(lockAzimuth, lockElevation);
+  }
+
+  /**
+   * `true` turns the camera to face the XY plane head-on (looking down `-Z`,
+   * keeping its distance to the target) and locks orbiting, leaving pan and
+   * zoom; `false` restores full orbiting. Works in either projection mode.
+   */
+  lockToXYPlane(locked: boolean): void {
+    this.wasmCamera.lock_to_xy_plane(locked);
+    this.dirty = true;
+  }
+
+  /** Unit vector from the eye towards the target (zero if they coincide). */
+  getForward(): Vec3Tuple {
+    const [x = 0, y = 0, z = 0] = this.wasmCamera.forward();
+    return [x, y, z];
+  }
+
+  /**
+   * The world-space ray through the screen point `(ndcX, ndcY)` (`[-1, 1]`,
+   * `+Y` up), starting on the near plane with a unit direction; `null` for
+   * non-finite input or a degenerate camera.
+   */
+  unprojectNdc(ndcX: number, ndcY: number): CameraRay | null {
+    const ray = this.wasmCamera.unproject_ndc(ndcX, ndcY);
+    if (ray.length !== 6) {
+      return null;
+    }
+    const [ox = 0, oy = 0, oz = 0, dx = 0, dy = 0, dz = 0] = ray;
+    return { origin: [ox, oy, oz], direction: [dx, dy, dz] };
   }
 
   /** Orbits around the target by the given angles, in radians. */

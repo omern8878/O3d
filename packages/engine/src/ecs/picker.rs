@@ -37,10 +37,7 @@ impl ScenePicker {
     /// position. Ties go to the entity with the lower dense index. Non-finite
     /// coordinates and a non-invertible camera also give `-1`.
     pub fn pick_ndc(&self, buffer: &EntityBuffer, camera: &Camera, ndc_x: f32, ndc_y: f32) -> i32 {
-        let Some(inv_view_proj) = camera.view_proj_mat().inverse() else {
-            return NO_ENTITY;
-        };
-        let Some(ray) = Ray::from_ndc(ndc_x, ndc_y, &inv_view_proj) else {
+        let Some(ray) = camera.ray_through_ndc(ndc_x, ndc_y) else {
             return NO_ENTITY;
         };
 

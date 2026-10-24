@@ -9,8 +9,9 @@ use wasm_bindgen::prelude::*;
 
 use super::input_guard::{is_valid_vec3, MAX_COORDINATE};
 use super::mat4::Mat4;
+use super::ray::Ray;
 use super::spherical::Spherical;
-use super::vec3::{add, sub};
+use super::vec3::{add, normalize, sub};
 
 /// Smallest allowed orthographic half-height; keeps the projection invertible.
 const MIN_ORTHO_HALF_HEIGHT: f32 = 0.0001;
@@ -27,6 +28,9 @@ const MAX_ASPECT: f32 = 1.0e4;
 
 /// Aspect ratio used when JS supplies an unusable one at construction.
 const DEFAULT_ASPECT: f32 = 1.0;
+
+/// Eye distance used by `lock_to_xy_plane` when the eye sits on the target.
+const DEFAULT_XY_PLANE_DISTANCE: f32 = 10.0;
 
 /// Smallest accepted zoom factor; keeps zoom from collapsing to zero.
 const MIN_ZOOM_FACTOR: f32 = 0.001;
@@ -56,6 +60,9 @@ pub struct Camera {
     near: f32,
     far: f32,
     view_proj: Mat4,
+    orbit_enabled: bool,
+    azimuth_locked: bool,
+    elevation_locked: bool,
 }
 
 #[wasm_bindgen]
@@ -80,6 +87,9 @@ impl Camera {
             near: 0.1,
             far: 1000.0,
             view_proj: Mat4::identity(),
+            orbit_enabled: true,
+            azimuth_locked: false,
+            elevation_locked: false,
         };
         camera.update_view_proj();
         camera
@@ -143,11 +153,22 @@ impl Camera {
 
     /// Orbits the eye around `target` on a sphere, keeping the distance.
     /// Elevation is clamped just short of straight up / down. Does nothing for
-    /// non-finite deltas or when the eye coincides with the target.
+    /// non-finite deltas, when the eye coincides with the target, or while
+    /// orbiting is disabled; a locked angle ignores its delta.
     pub fn orbit_3d(&mut self, delta_azimuth: f32, delta_elevation: f32) {
-        if !delta_azimuth.is_finite() || !delta_elevation.is_finite() {
+        if !self.orbit_enabled || !delta_azimuth.is_finite() || !delta_elevation.is_finite() {
             return;
         }
+        let delta_azimuth = if self.azimuth_locked {
+            0.0
+        } else {
+            delta_azimuth
+        };
+        let delta_elevation = if self.elevation_locked {
+            0.0
+        } else {
+            delta_elevation
+        };
         let Some(mut spherical) = Spherical::from_offset(sub(self.eye, self.target)) else {
             return;
         };
@@ -157,6 +178,64 @@ impl Camera {
 
         self.eye = add(self.target, spherical.to_offset());
         self.update_view_proj();
+    }
+
+    /// Enables or disables `orbit_3d`, e.g. while the pointer drags something
+    /// else. Pan, zoom and direct placement are unaffected.
+    pub fn set_orbit_enabled(&mut self, enabled: bool) {
+        self.orbit_enabled = enabled;
+    }
+
+    pub fn orbit_enabled(&self) -> bool {
+        self.orbit_enabled
+    }
+
+    /// Freezes the orbit's azimuth (rotation around `+Y`) and / or elevation.
+    pub fn set_orbit_locks(&mut self, lock_azimuth: bool, lock_elevation: bool) {
+        self.azimuth_locked = lock_azimuth;
+        self.elevation_locked = lock_elevation;
+    }
+
+    /// `true` turns the eye to face the XY plane head-on (looking down `-Z`
+    /// at the target, keeping its distance) and locks both orbit angles, so
+    /// only pan and zoom move the view. `false` unlocks full orbiting from the
+    /// current position. The projection mode is left unchanged.
+    pub fn lock_to_xy_plane(&mut self, locked: bool) {
+        self.set_orbit_locks(locked, locked);
+        if !locked {
+            return;
+        }
+        let distance = Spherical::from_offset(sub(self.eye, self.target))
+            .map_or(DEFAULT_XY_PLANE_DISTANCE, |spherical| spherical.radius);
+        let eye = add(self.target, [0.0, 0.0, distance]);
+        if is_valid_vec3(eye) {
+            self.eye = eye;
+            self.update_view_proj();
+        }
+    }
+
+    pub fn azimuth_locked(&self) -> bool {
+        self.azimuth_locked
+    }
+
+    pub fn elevation_locked(&self) -> bool {
+        self.elevation_locked
+    }
+
+    /// Unit vector from the eye towards the target, as `[x, y, z]` (the zero
+    /// vector if they coincide).
+    pub fn forward(&self) -> Vec<f32> {
+        normalize(sub(self.target, self.eye)).to_vec()
+    }
+
+    /// The world-space ray through the screen point `(ndc_x, ndc_y)` (`[-1, 1]`,
+    /// `+Y` up) as `[ox, oy, oz, dx, dy, dz]`: it starts on the near plane and
+    /// its direction is unit length. Empty for non-finite coordinates or a
+    /// non-invertible camera.
+    pub fn unproject_ndc(&self, ndc_x: f32, ndc_y: f32) -> Vec<f32> {
+        self.ray_through_ndc(ndc_x, ndc_y)
+            .map(|ray| [ray.origin, ray.direction].concat())
+            .unwrap_or_default()
     }
 
     /// Zooms by multiplying the visible size (`Ortho2D`) or the eye-target
@@ -206,6 +285,12 @@ impl Camera {
     /// The combined view-projection matrix (not exported to JS).
     pub(crate) fn view_proj_mat(&self) -> &Mat4 {
         &self.view_proj
+    }
+
+    /// The world-space ray through an NDC point; see [`Camera::unproject_ndc`].
+    pub(crate) fn ray_through_ndc(&self, ndc_x: f32, ndc_y: f32) -> Option<Ray> {
+        let inv_view_proj = self.view_proj.inverse()?;
+        Ray::from_ndc(ndc_x, ndc_y, &inv_view_proj)
     }
 
     fn projection(&self) -> Mat4 {

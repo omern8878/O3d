@@ -394,3 +394,100 @@ fn looking_straight_up_or_down_keeps_a_finite_matrix() {
         assert_close(&to_clip(&camera, [0.0, 0.0, 0.0])[..2], &[0.0, 0.0]);
     }
 }
+
+fn camera_3d_at(eye: [f32; 3]) -> Camera {
+    let mut camera = Camera::new(1.0);
+    camera.set_mode(ProjectionMode::Perspective3D);
+    camera.set_position(eye[0], eye[1], eye[2]);
+    camera
+}
+
+#[test]
+fn forward_points_from_the_eye_to_the_target() {
+    let camera = camera_3d_at([0.0, 0.0, 10.0]);
+    assert_close(&camera.forward(), &[0.0, 0.0, -1.0]);
+
+    let camera = camera_3d_at([3.0, 4.0, 0.0]);
+    assert_close(&camera.forward(), &[-0.6, -0.8, 0.0]);
+}
+
+#[test]
+fn unproject_ndc_returns_a_unit_ray_from_the_near_plane() {
+    let camera = camera_3d_at([0.0, 0.0, 10.0]);
+    let ray = camera.unproject_ndc(0.0, 0.0);
+
+    assert_eq!(ray.len(), 6);
+    assert_close(&ray, &[0.0, 0.0, 9.9, 0.0, 0.0, -1.0]);
+    assert!(camera.unproject_ndc(f32::NAN, 0.0).is_empty());
+}
+
+#[test]
+fn unprojected_ray_passes_through_the_world_point_under_the_cursor() {
+    let camera = camera_3d_at([4.0, 3.0, 12.0]);
+    let point = [1.5, -2.0, 0.5];
+    let ndc = camera
+        .view_proj_mat()
+        .transform_point3_projective(point)
+        .unwrap();
+    let ray = camera.unproject_ndc(ndc[0], ndc[1]);
+
+    let to_point = sub(point, [ray[0], ray[1], ray[2]]);
+    let along = crate::math::vec3::dot(to_point, [ray[3], ray[4], ray[5]]);
+    let closest = add(
+        [ray[0], ray[1], ray[2]],
+        [ray[3] * along, ray[4] * along, ray[5] * along],
+    );
+    for (c, p) in closest.iter().zip(point) {
+        assert!((c - p).abs() < 1e-3, "{closest:?} vs {point:?}");
+    }
+}
+
+#[test]
+fn disabled_orbit_ignores_orbit_input() {
+    let mut camera = camera_3d_at([0.0, 0.0, 10.0]);
+    camera.set_orbit_enabled(false);
+    camera.orbit_3d(1.0, 0.5);
+    assert!(!camera.orbit_enabled());
+    assert_close(&camera.forward(), &[0.0, 0.0, -1.0]);
+
+    camera.set_orbit_enabled(true);
+    camera.orbit_3d(1.0, 0.0);
+    assert!((camera.forward()[0] - -(1.0_f32).sin()).abs() < 1e-5);
+}
+
+#[test]
+fn locked_angles_ignore_only_their_own_delta() {
+    let mut camera = camera_3d_at([0.0, 0.0, 10.0]);
+    camera.set_orbit_locks(true, false);
+    camera.orbit_3d(1.0, 0.5);
+    let forward = camera.forward();
+    assert!(
+        forward[0].abs() < 1e-5,
+        "azimuth must not change: {forward:?}"
+    );
+    assert!((forward[1] - -(0.5_f32).sin()).abs() < 1e-5);
+
+    camera.set_orbit_locks(false, true);
+    camera.orbit_3d(0.0, 0.3);
+    assert!((camera.forward()[1] - -(0.5_f32).sin()).abs() < 1e-5);
+    assert!(!camera.azimuth_locked() && camera.elevation_locked());
+}
+
+#[test]
+fn xy_plane_lock_faces_the_plane_and_freezes_orbit() {
+    let mut camera = camera_3d_at([6.0, 8.0, 0.0]); // distance 10 from the origin
+    camera.lock_to_xy_plane(true);
+
+    assert_close(&camera.forward(), &[0.0, 0.0, -1.0]);
+    assert_close(&camera.unproject_ndc(0.0, 0.0)[..3], &[0.0, 0.0, 9.9]);
+    camera.orbit_3d(1.0, 1.0);
+    assert_close(&camera.forward(), &[0.0, 0.0, -1.0]);
+
+    // Pan and zoom still work while locked.
+    camera.zoom_by_factor(0.5);
+    assert_close(&camera.unproject_ndc(0.0, 0.0)[..3], &[0.0, 0.0, 4.9]);
+
+    camera.lock_to_xy_plane(false);
+    camera.orbit_3d(0.5, 0.0);
+    assert!(camera.forward()[0].abs() > 0.1);
+}
