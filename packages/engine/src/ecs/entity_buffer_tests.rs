@@ -213,3 +213,21 @@ fn allocate_entities_reuses_freed_ids_and_accepts_zero() {
     assert_eq!(again, vec![ids[1]], "the freed ID comes back first");
     assert_eq!(buf.get_dense_index(again[0] as usize), Some(2));
 }
+
+#[test]
+fn remove_entities_removes_many_and_reports_overwritten_slots() {
+    let mut buf = EntityBuffer::new(8);
+    let ids = buf.allocate_entities(6); // dense 0..=5
+    for (dense, &id) in ids.iter().enumerate() {
+        set_position(&mut buf, id as usize, [dense as f32, 0.0, 0.0]);
+    }
+
+    let overwritten = buf.remove_entities(&[ids[1], ids[5], 999, ids[1]]);
+
+    assert_eq!(buf.active_count(), 4);
+    // ids[5] (last) fills slot 1; removing it there pulls ids[4] into slot 1 again.
+    assert_eq!(overwritten, vec![1, 1]);
+    assert_eq!(position_of(&buf, ids[4] as usize), [4.0, 0.0, 0.0]);
+    assert_eq!(buf.get_dense_index(ids[1] as usize), None);
+    assert!(buf.remove_entities(&[]).is_empty());
+}

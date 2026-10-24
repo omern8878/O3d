@@ -99,6 +99,19 @@ impl EntityBuffer {
         (0..count).map(|_| self.allocate_entity() as u32).collect()
     }
 
+    /// Destroys many entities in one call (one Wasm boundary crossing instead
+    /// of one per entity). Invalid and repeated IDs are ignored.
+    ///
+    /// Returns every dense index whose data was overwritten by a swap, for
+    /// marking dirty. An index can appear more than once, or end up beyond
+    /// the final active count; callers clamp to the active range.
+    pub fn remove_entities(&mut self, entity_ids: &[u32]) -> Vec<u32> {
+        entity_ids
+            .iter()
+            .filter_map(|&id| u32::try_from(self.remove_entity(id as usize)).ok())
+            .collect()
+    }
+
     /// Destroys an entity, keeping the arrays gap-free. Invalid IDs are ignored.
     ///
     /// Returns the dense index whose data was overwritten by the swap, so

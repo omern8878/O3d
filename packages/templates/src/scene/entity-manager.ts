@@ -121,6 +121,20 @@ export class EntityManager {
     }
   }
 
+  /**
+   * Removes many entities in one Wasm call and returns how many were live.
+   * Unknown and repeated IDs are ignored. Every slot a swap-and-pop
+   * overwrote is marked dirty, exactly as with single removals.
+   */
+  removeEntities(ids: ArrayLike<number>): number {
+    const before = this.buffer.active_count();
+    const overwritten = this.buffer.remove_entities(Uint32Array.from(ids));
+    for (const denseIdx of overwritten) {
+      this.dirtyTracker.markAllChannelsDirty(denseIdx);
+    }
+    return before - this.buffer.active_count();
+  }
+
   /** Removes an entity. Unknown IDs are ignored. */
   removeEntity(id: EntityId): void {
     const overwrittenDenseIdx = this.buffer.remove_entity(id);

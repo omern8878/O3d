@@ -1,8 +1,17 @@
-import { CullingBuffer, wasm_memory } from "@engine/core/pkg/engine.js";
+import { CullingBuffer, SceneVisibility, wasm_memory } from "@engine/core/pkg/engine.js";
 import { FLOATS_PER_VEC3 } from "../memory/vec3-layout.ts";
 import type { VisibleViews } from "../types/culling.types.ts";
 import type { CameraController } from "./camera-controller.ts";
 import type { EntityManager } from "./entity-manager.ts";
+
+/** Where the whole scene stands relative to the camera frustum. */
+export type SceneVisibilityClass = "visible" | "hidden" | "partial";
+
+const VISIBILITY_CLASSES: Record<SceneVisibility, SceneVisibilityClass> = {
+  [SceneVisibility.Hidden]: "hidden",
+  [SceneVisibility.Partial]: "partial",
+  [SceneVisibility.Visible]: "visible",
+};
 
 /**
  * Runs frustum culling in Wasm and exposes the compacted visible set as
@@ -21,29 +30,31 @@ export class CullingManager {
   }
 
   /**
-   * Whole-scene trivial accept in O(1): whether every entity is certainly
-   * inside the camera frustum (the scene's bounding sphere or box lies inside
-   * all six planes), so a per-entity cull would keep everything and can be
-   * skipped.
+   * Whole-scene trivial accept / reject in O(1), from the scene's bounding
+   * volume (a sphere and a box around every entity):
    *
-   * Bounds only grow between recomputes; when a grown volume fails the test,
-   * it is recomputed exactly (one O(n) pass) and tested again, so looseness
-   * never costs a missed trivial accept.
+   * - `'visible'`: everything is inside the frustum; skip the per-entity cull.
+   * - `'hidden'`: everything is outside; draw nothing, skip the cull.
+   * - `'partial'`: the scene straddles the frustum; cull per entity.
+   *
+   * Bounds only grow between recomputes. When a grown volume can only be
+   * classified `'partial'`, it is recomputed exactly (one O(n) pass) and
+   * classified again, so looseness never costs a missed fast path.
    */
-  isSceneFullyVisible(entityManager: EntityManager, cameraController: CameraController): boolean {
+  classifyScene(entityManager: EntityManager, cameraController: CameraController): SceneVisibilityClass {
     if (entityManager.getActiveCount() === 0) {
-      return true;
+      return "hidden";
     }
     const camera = cameraController.getRawWasmCamera();
     const bounds = entityManager.getSceneBounds();
-    if (bounds.usable && CullingBuffer.bounds_fully_visible(camera, bounds.toArray())) {
-      return true;
-    }
-    if (!bounds.grown) {
-      return false;
+    const classify = () =>
+      bounds.usable ? VISIBILITY_CLASSES[CullingBuffer.classify_bounds(camera, bounds.toArray())] : "partial";
+    const first = classify();
+    if (first !== "partial" || !bounds.grown) {
+      return first;
     }
     entityManager.recomputeSceneBounds();
-    return bounds.usable && CullingBuffer.bounds_fully_visible(camera, bounds.toArray());
+    return classify();
   }
 
   /** Culls against the camera's frustum and returns the visible count. */

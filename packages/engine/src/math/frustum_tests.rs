@@ -1,4 +1,5 @@
 use super::*;
+use crate::math::bounding_volume::BoundingVolume;
 use crate::math::camera::{Camera, ProjectionMode};
 
 const TOLERANCE: f32 = 1e-4;
@@ -286,4 +287,57 @@ fn trivial_accept_rejects_invalid_input_and_degenerate_planes() {
         "never trivially accept on a broken camera"
     );
     assert!(!degenerate.contains_aabb([0.0; 3], [0.0; 3]));
+}
+
+#[test]
+fn excludes_sphere_and_aabb_reject_only_volumes_wholly_outside_a_plane() {
+    let frustum = ortho_frustum(); // x, y in [-100, 100], eye at z = 10
+
+    assert!(frustum.excludes_sphere([300.0, 0.0, -100.0], 50.0));
+    assert!(
+        !frustum.excludes_sphere([120.0, 0.0, -100.0], 50.0),
+        "pokes into view"
+    );
+    assert!(
+        frustum.excludes_sphere([0.0, 0.0, 50.0], 5.0),
+        "behind the near plane"
+    );
+    assert!(frustum.excludes_aabb([150.0, -10.0, -100.0], [170.0, 10.0, -50.0]));
+    assert!(!frustum.excludes_aabb([90.0, -10.0, -100.0], [170.0, 10.0, -50.0]));
+}
+
+#[test]
+fn classify_volume_covers_accept_reject_and_partial() {
+    let frustum = ortho_frustum();
+    let volume = |center: [f32; 3], half: f32| BoundingVolume {
+        center,
+        radius: half * 3.0_f32.sqrt(),
+        min: center.map(|c| c - half),
+        max: center.map(|c| c + half),
+    };
+
+    assert_eq!(
+        frustum.classify_volume(&volume([0.0, 0.0, -100.0], 20.0)),
+        VolumeVisibility::Visible
+    );
+    assert_eq!(
+        frustum.classify_volume(&volume([400.0, 0.0, -100.0], 20.0)),
+        VolumeVisibility::Hidden
+    );
+    assert_eq!(
+        frustum.classify_volume(&volume([100.0, 0.0, -100.0], 20.0)),
+        VolumeVisibility::Partial
+    );
+}
+
+#[test]
+fn trivial_reject_never_fires_on_invalid_input_or_a_degenerate_camera() {
+    let frustum = ortho_frustum();
+    assert!(!frustum.excludes_sphere([f32::NAN, 0.0, 0.0], 1.0));
+    assert!(!frustum.excludes_sphere([400.0, 0.0, -100.0], -1.0));
+    assert!(!frustum.excludes_aabb([1.0, 0.0, 0.0], [0.0, 0.0, 0.0]));
+
+    let degenerate = Frustum::from_view_proj(&Mat4([0.0; 16]));
+    assert!(!degenerate.excludes_sphere([400.0, 0.0, 0.0], 1.0));
+    assert!(!degenerate.excludes_aabb([400.0; 3], [401.0; 3]));
 }

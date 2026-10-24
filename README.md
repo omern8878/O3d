@@ -34,12 +34,12 @@ Five engines render the **same deterministic scene**: the sampled vector cat (70
 
 **Results at 100,000 entities** (P50 CPU time per frame; Apple M5, macOS 26.6, Chrome 155 headless with Metal WebGPU, cross-origin isolated for 5 µs timers):
 
-- **Static scenes: O3d is ~6× faster than Three.js.** An orbiting camera costs O3d **0.07 ms** per frame vs. 0.42–0.44 ms for Three.js and 2.80 ms for the JS graph. The scene's bounding volume lies inside the frustum, so O3d's O(1) whole-scene trivial accept skips the per-entity cull entirely and draws straight from the dirty-tracked buffers.
-- **Localized animation: O3d is fastest and sends the least.** Moving the 1% tail costs O3d **0.56 ms** and **12,000 B** per frame vs. 0.73 ms and 64,000 B for range-tuned Three.js (5.3× the bytes), 1.00 ms and 6.4 MB for idiomatic Three.js (533×), and 2.69 ms and 3.6 MB for the JS graph.
-- **Picking: O3d is ~27× faster than Three.js** (0.25 ms vs. 6.7 ms per query). The JS scene graph is nearly as fast as O3d (0.31 ms): the win comes from testing spheres over flat data rather than from Wasm itself. Three.js extracts every instance matrix and tests the plane's triangles.
-- **Deep zoom: only O3d culls per instance**, drawing 5,513 instances (5.5%) where every other engine draws all 100,000. That cull is real work: 1.75 ms of CPU per frame vs. 0.44 ms for Three.js, which does no per-instance culling. On this GPU the end-to-end frame time comes out the same (3.1 ms for both): 100k small quads do not saturate an M5. The draw saving should matter more on weaker GPUs or heavier shaders, which this run did not measure.
-- **Churn is still Three.js's best workload.** Despawning and spawning 2,000 random entities per frame costs O3d 3.62 ms vs. 3.05–3.21 ms for Three.js and 5.14 ms for the JS graph. Profiling O3d's frame: the 2,000 removals take ~0.16 ms and the 2,000 additions ~0.35 ms, so JS-to-Wasm call overhead is not the bottleneck. The cost is the upload: random removals spread O3d's single dirty interval across the whole buffer, so it re-sends about 3.6 MB per frame (half of Three's 7.6 MB, but close to a full upload).
-- **No sustained GC stalls.** At 100k the worst P50-to-P99 gap is 1.7 ms (Three.js during churn) and retained heap growth over 120 frames is at most ~23 KB. The one outlier was the JS scene graph's churn at 50k (P99 8.6 ms vs. P50 3.4 ms), the pattern of a collection of its discarded node objects. O3d's public `addNode` / `update*` calls still allocate small short-lived objects; V8 collects them without visible pauses at these rates.
+- **Static scenes: O3d is ~7× faster than Three.js.** An orbiting camera costs O3d **0.09 ms** per frame vs. 0.66 ms for Three.js and 3.09 ms for the JS graph. The scene's bounding volume lies inside the frustum, so O3d's O(1) whole-scene trivial accept skips the per-entity cull entirely and draws straight from the dirty-tracked buffers. Culling on and off now cost the same (0.09 vs. 0.07 ms).
+- **Localized animation: O3d is fastest and sends the least.** Moving the 1% tail costs O3d **0.98 ms** and **12,000 B** per frame vs. 1.37 ms and 64,000 B for range-tuned Three.js (5.3× the bytes), 1.87 ms and 6.4 MB for idiomatic Three.js (533×), and 2.99 ms and 3.6 MB for the JS graph.
+- **Picking: O3d is ~26× faster than Three.js** (0.26 ms vs. 6.7–6.8 ms per query). The JS scene graph is nearly as fast as O3d (0.30 ms): the win comes from testing spheres over flat data rather than from Wasm itself. Three.js extracts every instance matrix and tests the plane's triangles.
+- **Deep zoom: only O3d culls per instance**, drawing 5,513 instances (5.5%) where every other engine draws all 100,000. That cull is real work: about 2 ms of CPU per frame vs. 0.5 ms for Three.js, which does no per-instance culling. On this GPU the end-to-end frame time comes out the same (4.1 ms vs. 4.2–4.3 ms): 100k small quads do not saturate an M5. The draw saving should matter more on weaker GPUs or heavier shaders, which this run did not measure. A scene wholly *outside* the view is rejected in O(1): nothing is culled, uploaded or drawn.
+- **Churn is still Three.js's best workload.** Despawning and spawning 2,000 random entities per frame costs O3d 4.0 ms vs. 3.3–3.7 ms for Three.js and 5.1 ms for the JS graph. O3d now batches the frame's removals and spawns into one `removeNodes` and one `addNodes` call (two Wasm crossings instead of 4,000), but that overhead was never the bottleneck. The cost is the upload: random removals spread O3d's single dirty interval across the whole buffer, so it re-sends about 3.4 MB per frame (half of Three's 7.3 MB, but close to a full upload).
+- **No sustained GC stalls.** At 100k the worst P50-to-P99 gap is 1.3 ms (Three.js during churn) and retained heap growth over 120 frames is at most ~42 KB. O3d's single-node `addNode` / `update*` calls still allocate small short-lived objects; the bulk APIs do not.
 - **Memory.** Per-instance GPU data is 36 B for O3d and the JS graph, and 76 B for Three.js (a 4×4 matrix plus a colour). The JS heap per entity is clearly highest for the JS scene graph (~212 B for its object graph). The other engines' figures (9–122 B) include benchmark bookkeeping and follow the run order rather than the engine (identical code shows 9 vs. 45 B), so read them as noise.
 
 Methodology notes: Three.js uses its default `StaticDrawUsage`; with `DynamicDrawUsage` its WebGPU backend re-uploads the instance buffer on every frame even when nothing changed. Three.js picks against the plane's triangles while O3d and the JS graph pick against bounding spheres, so at 100k Three.js agrees with O3d on 43 of 50 queries and the JS graph on 46. Pixi.js is not included: it is a 2D renderer and cannot express the perspective orbit, depth culling or 3D raycast. Sub-millisecond medians move by roughly ±30% between runs; the full 10k / 50k / 100k results are in [`docs/media/benchmark-results.md`](docs/media/benchmark-results.md) and [`docs/media/benchmark-results.json`](docs/media/benchmark-results.json). Re-run them with **Run 100k Benchmark** in the playground or `npm run benchmark`.
@@ -55,51 +55,51 @@ _Real WebGPU device · 30 warm-up + 120 measured frames per workload (picking: 1
 
 | Engine | CPU P50 | P95 | P99 | GPU-incl. P50 | Bytes / frame | Drawn | O3d vs. engine |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| **O3d (Rust/Wasm SoA + WebGPU)** | 0.07 ms | 0.13 ms | 0.22 ms | 4.08 ms | 64 B | 100,000 | — |
-| O3d, culling off | 0.07 ms | 0.12 ms | 0.13 ms | 3.26 ms | 64 B | 100,000 | same engine |
-| Three.js InstancedMesh (+ addUpdateRange) | 0.44 ms | 0.79 ms | 0.82 ms | 3.59 ms | 64 B | 100,000 | 6.4× faster |
-| Three.js InstancedMesh (needsUpdate) | 0.42 ms | 0.63 ms | 0.76 ms | 2.46 ms | 64 B | 100,000 | 6.0× faster |
-| JS scene graph (AoS objects) | 2.80 ms | 3.42 ms | 3.63 ms | 5.34 ms | 3.43 MB | 100,000 | 39.9× faster |
+| **O3d (Rust/Wasm SoA + WebGPU)** | 0.09 ms | 0.16 ms | 0.27 ms | 4.58 ms | 64 B | 100,000 | — |
+| O3d, culling off | 0.07 ms | 0.15 ms | 0.22 ms | 4.88 ms | 64 B | 100,000 | same engine |
+| Three.js InstancedMesh (+ addUpdateRange) | 0.66 ms | 0.92 ms | 0.98 ms | 4.61 ms | 64 B | 100,000 | 7.0× faster |
+| Three.js InstancedMesh (needsUpdate) | 0.66 ms | 0.92 ms | 1.04 ms | 4.44 ms | 64 B | 100,000 | 6.9× faster |
+| JS scene graph (AoS objects) | 3.09 ms | 3.28 ms | 3.40 ms | 5.90 ms | 3.43 MB | 100,000 | 32.5× faster |
 
 **2. Localized animation (1% contiguous slice)**: 1,000 contiguous tail entities move every frame.
 
 | Engine | CPU P50 | P95 | P99 | GPU-incl. P50 | Bytes / frame | Drawn | O3d vs. engine |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| **O3d (Rust/Wasm SoA + WebGPU)** | 0.56 ms | 1.09 ms | 1.14 ms | 3.39 ms | 11.7 KB | 100,000 | — |
-| O3d, culling off | 0.92 ms | 1.13 ms | 1.17 ms | 3.55 ms | 11.7 KB | 100,000 | same engine |
-| Three.js InstancedMesh (+ addUpdateRange) | 0.73 ms | 0.99 ms | 1.38 ms | 3.88 ms | 62.5 KB | 100,000 | 1.3× faster |
-| Three.js InstancedMesh (needsUpdate) | 1.00 ms | 1.94 ms | 2.00 ms | 4.61 ms | 6.10 MB | 100,000 | 1.8× faster |
-| JS scene graph (AoS objects) | 2.69 ms | 2.98 ms | 3.09 ms | 5.78 ms | 3.43 MB | 100,000 | 4.8× faster |
+| **O3d (Rust/Wasm SoA + WebGPU)** | 0.98 ms | 1.26 ms | 1.32 ms | 4.41 ms | 11.7 KB | 100,000 | — |
+| O3d, culling off | 0.97 ms | 1.38 ms | 1.47 ms | 4.39 ms | 11.7 KB | 100,000 | same engine |
+| Three.js InstancedMesh (+ addUpdateRange) | 1.37 ms | 1.57 ms | 1.66 ms | 4.12 ms | 62.5 KB | 100,000 | 1.4× faster |
+| Three.js InstancedMesh (needsUpdate) | 1.87 ms | 2.13 ms | 2.19 ms | 5.87 ms | 6.10 MB | 100,000 | 1.9× faster |
+| JS scene graph (AoS objects) | 2.99 ms | 3.19 ms | 3.22 ms | 6.07 ms | 3.43 MB | 100,000 | 3.0× faster |
 
 **3. Entity churn (despawn + spawn)**: 2,000 random entities despawned and as many spawned every frame.
 
 | Engine | CPU P50 | P95 | P99 | GPU-incl. P50 | Bytes / frame | Drawn | O3d vs. engine |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| **O3d (Rust/Wasm SoA + WebGPU)** | 3.63 ms | 4.32 ms | 4.55 ms | 6.61 ms | 3.43 MB | 100,000 | — |
-| O3d, culling off | 3.87 ms | 4.93 ms | 5.13 ms | 7.13 ms | 3.43 MB | 100,000 | same engine |
-| Three.js InstancedMesh (+ addUpdateRange) | 3.21 ms | 4.38 ms | 4.87 ms | 6.81 ms | 7.25 MB | 100,000 | 1.1× slower |
-| Three.js InstancedMesh (needsUpdate) | 3.05 ms | 3.89 ms | 4.21 ms | 6.54 ms | 7.25 MB | 100,000 | 1.2× slower |
-| JS scene graph (AoS objects) | 5.14 ms | 5.80 ms | 6.65 ms | 8.54 ms | 3.43 MB | 100,000 | 1.4× faster |
+| **O3d (Rust/Wasm SoA + WebGPU)** | 4.00 ms | 4.38 ms | 4.48 ms | 7.34 ms | 3.43 MB | 100,000 | — |
+| O3d, culling off | 3.59 ms | 3.93 ms | 4.31 ms | 6.94 ms | 3.43 MB | 100,000 | same engine |
+| Three.js InstancedMesh (+ addUpdateRange) | 3.33 ms | 4.29 ms | 4.62 ms | 7.39 ms | 7.25 MB | 100,000 | 1.2× slower |
+| Three.js InstancedMesh (needsUpdate) | 3.70 ms | 4.08 ms | 4.21 ms | 7.95 ms | 7.25 MB | 100,000 | 1.1× slower |
+| JS scene graph (AoS objects) | 5.13 ms | 5.36 ms | 5.90 ms | 8.50 ms | 3.43 MB | 100,000 | 1.3× faster |
 
 **4. Deep zoom into the eye (frustum culling)**: Camera tight on the cat's eye, jittered by 0.002 units each frame so culling reruns.
 
 | Engine | CPU P50 | P95 | P99 | GPU-incl. P50 | Bytes / frame | Drawn | O3d vs. engine |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| **O3d (Rust/Wasm SoA + WebGPU)** | 1.75 ms | 2.07 ms | 2.25 ms | 3.14 ms | 193.9 KB | 5,513 | — |
-| O3d, culling off | 0.06 ms | 0.13 ms | 0.21 ms | 3.83 ms | 64 B | 100,000 | same engine |
-| Three.js InstancedMesh (+ addUpdateRange) | 0.44 ms | 0.80 ms | 0.86 ms | 3.15 ms | 64 B | 100,000 | 4.0× slower |
-| Three.js InstancedMesh (needsUpdate) | 0.44 ms | 0.61 ms | 0.64 ms | 2.96 ms | 64 B | 100,000 | 4.0× slower |
-| JS scene graph (AoS objects) | 2.94 ms | 3.53 ms | 3.73 ms | 5.34 ms | 3.43 MB | 100,000 | 1.7× faster |
+| **O3d (Rust/Wasm SoA + WebGPU)** | 1.96 ms | 2.62 ms | 2.80 ms | 4.06 ms | 193.9 KB | 5,513 | — |
+| O3d, culling off | 0.08 ms | 0.17 ms | 0.22 ms | 4.31 ms | 64 B | 100,000 | same engine |
+| Three.js InstancedMesh (+ addUpdateRange) | 0.47 ms | 0.81 ms | 0.93 ms | 4.22 ms | 64 B | 100,000 | 4.2× slower |
+| Three.js InstancedMesh (needsUpdate) | 0.51 ms | 0.77 ms | 0.88 ms | 4.31 ms | 64 B | 100,000 | 3.8× slower |
+| JS scene graph (AoS objects) | 3.09 ms | 3.20 ms | 3.25 ms | 5.79 ms | 3.43 MB | 100,000 | 1.6× faster |
 
 **5. Raycast picking**: 50 pointer queries against every entity (overview camera).
 
 | Engine | Latency P50 | P95 | P99 | O3d vs. engine |
 |---|---:|---:|---:|---:|
-| **O3d (Rust/Wasm SoA + WebGPU)** | 0.25 ms | 0.27 ms | 0.27 ms | — |
-| O3d, culling off | 0.25 ms | 0.25 ms | 0.26 ms | same engine |
-| Three.js InstancedMesh (+ addUpdateRange) | 6.69 ms | 6.87 ms | 6.88 ms | 26.7× faster |
-| Three.js InstancedMesh (needsUpdate) | 6.66 ms | 6.84 ms | 7.01 ms | 26.6× faster |
-| JS scene graph (AoS objects) | 0.31 ms | 0.37 ms | 0.42 ms | 1.2× faster |
+| **O3d (Rust/Wasm SoA + WebGPU)** | 0.26 ms | 0.27 ms | 0.28 ms | — |
+| O3d, culling off | 0.25 ms | 0.26 ms | 0.27 ms | same engine |
+| Three.js InstancedMesh (+ addUpdateRange) | 6.81 ms | 6.90 ms | 6.93 ms | 25.7× faster |
+| Three.js InstancedMesh (needsUpdate) | 6.71 ms | 6.79 ms | 6.88 ms | 25.3× faster |
+| JS scene graph (AoS objects) | 0.30 ms | 0.36 ms | 0.39 ms | 1.1× faster |
 
 _O3d hit an entity on 36/50 queries. Same entity as O3d: Three.js InstancedMesh (+ addUpdateRange): 43/50; Three.js InstancedMesh (needsUpdate): 43/50; JS scene graph (AoS objects): 46/50._
 
@@ -124,7 +124,7 @@ _O3d hit an entity on 36/50 queries. Same entity as O3d: Three.js InstancedMesh 
 | O(1) ECS | Sparse-set indexing with Structure-of-Arrays storage: constant-time create, remove and lookup. |
 | Idle = 0 bytes | Unchanged scenes upload nothing, whether fully visible or culled; edits upload only the touched slice. |
 | One draw call | All visible entities render as instanced quads in a single `draw`. |
-| Culled on the CPU | O(1) whole-scene trivial accept first; otherwise Gribb-Hartmann culling with stream compaction sends only visible instances. |
+| Culled on the CPU | O(1) whole-scene trivial accept / reject first; otherwise Gribb-Hartmann culling with stream compaction sends only visible instances. |
 | Camera-facing SDF shapes | Billboarded quads with analytically anti-aliased discs: smooth at any zoom, solid from any angle. |
 | Pixel-accurate picking | Click or tap any point to get the entity under it, nearest-first, in 2D and 3D. |
 | Measurable | `getFrameStats()` reports drawn instances and every byte uploaded, per frame. |
@@ -178,11 +178,12 @@ Change tracking keeps one inclusive `[min, max]` interval of dense indices per c
 ### Gribb-Hartmann Frustum Culling with Stream Compaction
 Six normalized frustum planes are extracted directly from the column-major view-projection matrix (Gribb-Hartmann), adapted to WebGPU's `[0, 1]` depth range (`near = row 2`, `far = row 3 − row 2`). Each entity is tested as a bounding sphere whose radius is half the diagonal of its scale. **Stream compaction** then copies only the visible entities into packed arrays, reusing allocated capacity every frame.
 
-Before any of that, an **O(1) whole-scene trivial accept** runs. The engine keeps a conservative bounding volume of every entity: a sphere and an axis-aligned box, grown in O(1) on each write. If either lies fully inside all six planes, no entity can be off-screen, so the per-entity cull and compaction are skipped. The sphere suits round scenes, the box flat 2D ones. Bounds only grow between writes. When a grown volume fails the test, it is recomputed exactly in one Wasm pass and retried, so looseness never costs a missed fast path. A trivial accept can only cause more to be drawn, never less, so a loose bound is always visually safe.
+Before any of that, an **O(1) whole-scene trivial accept / reject** runs. The engine keeps a conservative bounding volume of every entity: a sphere and an axis-aligned box, grown in O(1) on each write. If either lies fully inside all six planes, no entity can be off-screen, so the per-entity cull and compaction are skipped. If either lies wholly outside one plane, no entity can be on-screen, so nothing is culled, uploaded or drawn. The sphere suits round scenes, the box flat 2D ones. Bounds only grow between writes. When a grown volume fails the test, it is recomputed exactly in one Wasm pass and retried, so looseness never costs a missed fast path. A trivial accept can only cause more to be drawn, never less, so a loose bound is always visually safe.
 
 | Situation | Behaviour | Instance upload |
 |-----------|-----------|-----------------|
 | Whole scene inside the frustum (O(1) bounds test) | Dirty-tracked full path; no per-entity cull | Dirty sub-slices only (0 bytes if unchanged) |
+| Whole scene outside the frustum (O(1) bounds test) | Nothing culled or drawn | None; edits stay tracked until the scene is back in view |
 | Everything visible, bounds inconclusive | Per-entity cull, then the dirty-tracked full path | Dirty sub-slices only (0 bytes if unchanged) |
 | Partially visible, nothing changed | Previous visible set redrawn; no cull | None |
 | Partially visible, camera or entities changed | Re-cull and compact | The visible set |
@@ -270,6 +271,7 @@ const b = scene.addNode([20, 10, 0], [8, 8, 8], [1.0, 0.5, 0.2]);
 scene.updateNodePosition(b, [25, 15, 0]);
 scene.updateNodeColor(a, [1, 1, 1]);
 scene.removeNode(b); // true if the node existed
+scene.removeNodes(manyIds); // batched: one Wasm call, returns how many existed
 
 // Bulk API for large scenes: one Wasm call and one copy per attribute.
 const ids = scene.addNodes({ positions, scales, colors }); // flat Float32Arrays, 3 values per node

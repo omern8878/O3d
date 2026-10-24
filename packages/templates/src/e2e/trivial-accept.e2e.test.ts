@@ -103,4 +103,37 @@ describe("whole-scene frustum trivial accept", () => {
     frame();
     assert.equal(culls(), 1);
   });
+
+  it("trivially rejects a scene entirely off-screen: no cull, no upload, nothing drawn", () => {
+    const { camera, renderer, frame, culls } = setup();
+    frame();
+
+    camera.panByPixels(-4000, 0, 800); // look far to the right of the grid
+    assert.equal(frame(), 0);
+    assert.equal(culls(), 0, "decided in O(1)");
+    assert.deepEqual(renderer.getLastFrameUploads(), []);
+  });
+
+  it("edits made while trivially rejected are uploaded once the scene is back in view", () => {
+    const { entities, camera, renderer, frame } = setup();
+    frame();
+    camera.panByPixels(-4000, 0, 800);
+    frame();
+
+    entities.updateEntity(10, { color: "#ff0000" });
+    assert.equal(frame(), 0);
+    camera.panByPixels(4000, 0, 800);
+
+    assert.equal(frame(), 81);
+    assert.deepEqual(renderer.getLastFrameUploads(), [{ channel: "color", byteOffset: 10 * 12, byteLength: 12 }]);
+  });
+
+  it("classifyScene reports visible, hidden and partial", () => {
+    const { entities, camera, culling } = setup();
+    assert.equal(culling.classifyScene(entities, camera), "visible");
+    camera.zoom(0.5);
+    assert.equal(culling.classifyScene(entities, camera), "partial");
+    camera.panByPixels(-4000, 0, 800);
+    assert.equal(culling.classifyScene(entities, camera), "hidden");
+  });
 });

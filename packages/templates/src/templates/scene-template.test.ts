@@ -377,4 +377,30 @@ describe("SceneTemplate", () => {
       assert.equal(scene.renderFrame(), 1);
     });
   });
+
+  describe("batched removal", () => {
+    it("removeNodes removes many nodes in one call and reports how many existed", () => {
+      const { scene } = createScene({ enableCulling: false });
+      const ids = scene.addNodes({ positions: Float32Array.from({ length: 30 }, (_, i) => i) });
+      scene.renderFrame();
+
+      assert.equal(scene.removeNodes([ids[2]!, ids[9]!, ids[2]!, 12345]), 2);
+      assert.equal(scene.getActiveCount(), 8);
+      assert.equal(scene.removeNodes([]), 0);
+    });
+
+    it("uploads exactly the slots swap-and-pop overwrote", () => {
+      const { scene } = createScene({ enableCulling: false });
+      const ids = scene.addNodes({ positions: new Float32Array(3 * 10) });
+      scene.renderFrame();
+
+      scene.removeNodes([ids[3]!]); // the last node moves into slot 3
+      scene.renderFrame();
+
+      assert.deepEqual(
+        scene.getFrameStats().uploads.map((u) => [u.channel, u.byteOffset, u.byteLength]),
+        [["position", 36, 12], ["scale", 36, 12], ["color", 36, 12]],
+      );
+    });
+  });
 });

@@ -6,7 +6,7 @@ pub mod init;
 pub mod math;
 pub mod memory;
 
-pub use ecs::culling_buffer::CullingBuffer;
+pub use ecs::culling_buffer::{CullingBuffer, SceneVisibility};
 pub use ecs::entity_buffer::EntityBuffer;
 pub use ecs::picker::ScenePicker;
 pub use init::init_engine;

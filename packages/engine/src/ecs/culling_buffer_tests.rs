@@ -229,27 +229,117 @@ fn bounds(center: [f32; 3], radius: f32, min: [f32; 3], max: [f32; 3]) -> Vec<f3
 }
 
 #[test]
-fn bounds_fully_visible_trivially_accepts_contained_volumes_only() {
+fn classify_bounds_trivially_accepts_contained_volumes() {
     let camera = camera(); // x, y in [-100, 100]; near plane at z = 9.9
 
     let flat_inside = bounds([0.0; 3], 127.3, [-90.0, -90.0, 0.0], [90.0, 90.0, 0.0]);
-    let flat_too_wide = bounds([0.0; 3], 212.2, [-150.0, -150.0, 0.0], [150.0, 150.0, 0.0]);
-    assert!(CullingBuffer::bounds_fully_visible(&camera, &flat_inside));
-    assert!(!CullingBuffer::bounds_fully_visible(
-        &camera,
-        &flat_too_wide
-    ));
+    assert_eq!(
+        CullingBuffer::classify_bounds(&camera, &flat_inside),
+        SceneVisibility::Visible
+    );
 }
 
 #[test]
-fn malformed_bounds_are_never_trivially_accepted() {
+fn classify_bounds_trivially_rejects_volumes_outside_one_plane() {
+    let camera = camera();
+
+    let far_right = bounds(
+        [500.0, 0.0, 0.0],
+        50.0,
+        [450.0, -50.0, -50.0],
+        [550.0, 50.0, 50.0],
+    );
+    let behind_eye = bounds(
+        [0.0, 0.0, 200.0],
+        10.0,
+        [-10.0, -10.0, 190.0],
+        [10.0, 10.0, 210.0],
+    );
+    assert_eq!(
+        CullingBuffer::classify_bounds(&camera, &far_right),
+        SceneVisibility::Hidden
+    );
+    assert_eq!(
+        CullingBuffer::classify_bounds(&camera, &behind_eye),
+        SceneVisibility::Hidden
+    );
+}
+
+#[test]
+fn classify_bounds_reports_partial_for_volumes_straddling_a_plane() {
+    let camera = camera();
+
+    let straddling = bounds(
+        [100.0, 0.0, 0.0],
+        30.0,
+        [70.0, -30.0, 0.0],
+        [130.0, 30.0, 0.0],
+    );
+    let too_wide = bounds([0.0; 3], 212.2, [-150.0, -150.0, 0.0], [150.0, 150.0, 0.0]);
+    assert_eq!(
+        CullingBuffer::classify_bounds(&camera, &straddling),
+        SceneVisibility::Partial
+    );
+    assert_eq!(
+        CullingBuffer::classify_bounds(&camera, &too_wide),
+        SceneVisibility::Partial
+    );
+}
+
+#[test]
+fn malformed_bounds_always_fall_back_to_partial() {
     let camera = camera();
     let mut nan = bounds([0.0; 3], 1.0, [-1.0; 3], [1.0; 3]);
     nan[0] = f32::NAN;
 
-    assert!(!CullingBuffer::bounds_fully_visible(&camera, &[]));
-    assert!(!CullingBuffer::bounds_fully_visible(&camera, &[0.0; 9]));
-    assert!(!CullingBuffer::bounds_fully_visible(&camera, &nan));
+    for malformed in [vec![], vec![0.0; 9], nan] {
+        assert_eq!(
+            CullingBuffer::classify_bounds(&camera, &malformed),
+            SceneVisibility::Partial
+        );
+    }
+}
+
+/// The classification must agree with what a full per-entity cull finds.
+fn assert_classification_matches_cull(buffer: &EntityBuffer, expected: SceneVisibility) {
+    let camera = camera();
+    let bounds = CullingBuffer::compute_scene_bounds(buffer);
+    let visible = CullingBuffer::new(4).cull(buffer, &camera);
+
+    assert_eq!(CullingBuffer::classify_bounds(&camera, &bounds), expected);
+    match expected {
+        SceneVisibility::Visible => assert_eq!(visible, buffer.active_count()),
+        SceneVisibility::Hidden => assert_eq!(visible, 0),
+        SceneVisibility::Partial => assert!(visible > 0 && visible < buffer.active_count()),
+    }
+}
+
+#[test]
+fn trivial_accept_matches_a_full_cull_that_keeps_everything() {
+    // Flat 2D layout (z = 0): only the box can be trivially accepted.
+    let mut buffer = EntityBuffer::new(4);
+    for (i, position) in INSIDE.iter().enumerate() {
+        add(
+            &mut buffer,
+            [position[0] * 0.5, position[1] * 0.5, 0.0],
+            (i + 1) as f32,
+        );
+    }
+    assert_classification_matches_cull(&buffer, SceneVisibility::Visible);
+}
+
+#[test]
+fn trivial_reject_matches_a_full_cull_that_keeps_nothing() {
+    let mut buffer = EntityBuffer::new(4);
+    for i in 0..4 {
+        add(&mut buffer, [1000.0 + i as f32 * 10.0, 0.0, 0.0], 1.0);
+    }
+    assert_classification_matches_cull(&buffer, SceneVisibility::Hidden);
+}
+
+#[test]
+fn partial_intersection_matches_a_full_cull_that_keeps_some() {
+    assert_classification_matches_cull(&scene(), SceneVisibility::Partial); // 4 of 10 on screen
 }
 
 #[test]
@@ -270,39 +360,6 @@ fn scene_bounds_enclose_every_entity_the_culler_tests() {
             assert!(coordinate - radius >= min - 1e-3 && coordinate + radius <= max + 1e-3);
         }
     }
-}
-
-#[test]
-fn a_trivially_accepted_scene_is_exactly_what_a_full_cull_keeps() {
-    // Flat 2D layout (z = 0): only the box can be trivially accepted.
-    let mut buffer = EntityBuffer::new(4);
-    for (i, position) in INSIDE.iter().enumerate() {
-        add(
-            &mut buffer,
-            [position[0] * 0.5, position[1] * 0.5, 0.0],
-            (i + 1) as f32,
-        );
-    }
-    let camera = camera();
-
-    assert!(CullingBuffer::bounds_fully_visible(
-        &camera,
-        &CullingBuffer::compute_scene_bounds(&buffer)
-    ));
-    assert_eq!(
-        CullingBuffer::new(4).cull(&buffer, &camera),
-        buffer.active_count()
-    );
-}
-
-#[test]
-fn a_partly_visible_scene_is_not_trivially_accepted() {
-    let buffer = scene(); // 4 of 10 entities on screen
-
-    assert!(!CullingBuffer::bounds_fully_visible(
-        &camera(),
-        &CullingBuffer::compute_scene_bounds(&buffer)
-    ));
 }
 
 #[test]

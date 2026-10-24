@@ -15,13 +15,36 @@ use wasm_bindgen::prelude::*;
 use super::entity_buffer::EntityBuffer;
 use crate::math::bounding_volume::BoundingVolume;
 use crate::math::camera::Camera;
-use crate::math::frustum::Frustum;
+use crate::math::frustum::{Frustum, VolumeVisibility};
 
 const FLOATS_PER_VEC3: usize = 3;
 
 /// Upper bound on the capacity a caller may request up front; see
 /// `EntityBuffer` for the rationale.
 const MAX_INITIAL_CAPACITY: usize = 1 << 22;
+
+/// Where a whole scene stands relative to the camera frustum, decided in O(1)
+/// from its bounding volume.
+#[wasm_bindgen]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SceneVisibility {
+    /// Entirely outside: draw nothing, skip the per-entity cull.
+    Hidden = 0,
+    /// Straddles the frustum: run the per-entity cull.
+    Partial = 1,
+    /// Entirely inside: draw everything, skip the per-entity cull.
+    Visible = 2,
+}
+
+impl From<VolumeVisibility> for SceneVisibility {
+    fn from(visibility: VolumeVisibility) -> Self {
+        match visibility {
+            VolumeVisibility::Hidden => SceneVisibility::Hidden,
+            VolumeVisibility::Partial => SceneVisibility::Partial,
+            VolumeVisibility::Visible => SceneVisibility::Visible,
+        }
+    }
+}
 
 /// Visible entities from the last `cull()`, packed in dense (original) order.
 #[wasm_bindgen]
@@ -88,14 +111,17 @@ impl CullingBuffer {
         self.visible_count
     }
 
-    /// Whole-scene trivial accept: whether `bounds` (the flat bounding-volume
-    /// layout `[cx, cy, cz, r, min_x, min_y, min_z, max_x, max_y, max_z]`)
-    /// lies entirely inside `camera`'s frustum. When the volume encloses every
-    /// entity, `true` means a `cull()` would keep all of them, so it can be
-    /// skipped. Malformed or non-finite bounds return `false` (cull as usual).
-    pub fn bounds_fully_visible(camera: &Camera, bounds: &[f32]) -> bool {
-        BoundingVolume::from_slice(bounds).is_some_and(|volume| {
-            Frustum::from_view_proj(camera.view_proj_mat()).contains_volume(&volume)
+    /// Whole-scene trivial accept / reject: classifies `bounds` (the flat
+    /// bounding-volume layout `[cx, cy, cz, r, min_x, min_y, min_z, max_x,
+    /// max_y, max_z]`) against `camera`'s frustum in O(1). When the volume
+    /// encloses every entity, `Visible` means a `cull()` would keep all of
+    /// them and `Hidden` means it would keep none, so either way it can be
+    /// skipped. Malformed or non-finite bounds give `Partial` (cull as usual).
+    pub fn classify_bounds(camera: &Camera, bounds: &[f32]) -> SceneVisibility {
+        BoundingVolume::from_slice(bounds).map_or(SceneVisibility::Partial, |volume| {
+            Frustum::from_view_proj(camera.view_proj_mat())
+                .classify_volume(&volume)
+                .into()
         })
     }
 

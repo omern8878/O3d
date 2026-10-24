@@ -139,6 +139,14 @@ export class SceneTemplate {
   }
 
   /**
+   * Removes many nodes in one call (one Wasm boundary crossing) and returns
+   * how many existed. Unknown and repeated IDs are ignored.
+   */
+  removeNodes(ids: ArrayLike<number>): number {
+    return this.entities.removeEntities(ids);
+  }
+
+  /**
    * The nearest node under a pointer position, e.g. `event.clientX` /
    * `event.clientY` with the canvas's `getBoundingClientRect()`.
    */

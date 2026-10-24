@@ -47,6 +47,17 @@ impl Plane {
     }
 }
 
+/// How a bounding volume relates to the frustum, decided in O(1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VolumeVisibility {
+    /// Entirely outside: nothing it bounds can be visible (trivial reject).
+    Hidden,
+    /// Straddles a plane (or cannot be decided): per-entity culling is needed.
+    Partial,
+    /// Entirely inside: everything it bounds is visible (trivial accept).
+    Visible,
+}
+
 /// Six inward-facing planes, ordered Left, Right, Bottom, Top, Near, Far.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Frustum {
@@ -139,6 +150,48 @@ impl Frustum {
     pub fn contains_volume(&self, volume: &BoundingVolume) -> bool {
         self.contains_sphere(volume.center, volume.radius)
             || self.contains_aabb(volume.min, volume.max)
+    }
+
+    /// Trivial-reject test: `true` only if the whole sphere lies outside some
+    /// plane. Invalid input and degenerate planes never reject.
+    pub fn excludes_sphere(&self, center: [f32; 3], radius: f32) -> bool {
+        if !radius.is_finite() || radius < 0.0 || !center.iter().all(|c| c.is_finite()) {
+            return false;
+        }
+        self.planes
+            .iter()
+            .any(|plane| plane.normal != [0.0; 3] && plane.distance_to_point(center) < -radius)
+    }
+
+    /// Trivial-reject test for a box: `true` only if even its corner nearest
+    /// the inside of some plane is outside it.
+    pub fn excludes_aabb(&self, min: [f32; 3], max: [f32; 3]) -> bool {
+        let finite = min.iter().chain(&max).all(|v| v.is_finite());
+        if !finite || (0..3).any(|axis| min[axis] > max[axis]) {
+            return false;
+        }
+        let center: [f32; 3] = std::array::from_fn(|axis| 0.5 * (min[axis] + max[axis]));
+        let half: [f32; 3] = std::array::from_fn(|axis| 0.5 * (max[axis] - min[axis]));
+        self.planes.iter().any(|plane| {
+            let n = plane.normal;
+            let reach = n[0].abs() * half[0] + n[1].abs() * half[1] + n[2].abs() * half[2];
+            n != [0.0; 3] && plane.distance_to_point(center) < -reach
+        })
+    }
+
+    /// Classifies a whole scene's bounding volume in O(1): trivially
+    /// visible, trivially hidden, or partial (needs per-entity culling).
+    /// Either shape deciding is enough, since both enclose every entity.
+    pub fn classify_volume(&self, volume: &BoundingVolume) -> VolumeVisibility {
+        if self.contains_volume(volume) {
+            VolumeVisibility::Visible
+        } else if self.excludes_sphere(volume.center, volume.radius)
+            || self.excludes_aabb(volume.min, volume.max)
+        {
+            VolumeVisibility::Hidden
+        } else {
+            VolumeVisibility::Partial
+        }
     }
 
     /// Visibility of a unit quad or cube centered at `pos` and stretched by

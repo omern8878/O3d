@@ -133,10 +133,11 @@ export class InstancedRenderer {
    * scene is re-culled and re-uploaded only when the camera or the entities
    * changed, so an unchanged zoomed-in frame uploads nothing either.
    *
-   * Before culling, the whole scene's bounding volume is tested against the
-   * frustum in O(1). When it lies fully inside, the per-entity cull and
-   * stream compaction are skipped and the dense, dirty-tracked buffers are
-   * drawn directly.
+   * Before culling, the whole scene's bounding volume is classified against
+   * the frustum in O(1). Fully inside: the per-entity cull and stream
+   * compaction are skipped and the dense, dirty-tracked buffers are drawn
+   * directly. Fully outside: nothing is culled, uploaded or drawn (pending
+   * edits stay tracked for when the scene comes back into view).
    */
   renderCulled(
     entityManager: EntityManager,
@@ -157,8 +158,12 @@ export class InstancedRenderer {
       return this.drawFrame(this.culledVisibleCount);
     }
 
-    if (cullingManager.isSceneFullyVisible(entityManager, cameraController)) {
+    const sceneVisibility = cullingManager.classifyScene(entityManager, cameraController);
+    if (sceneVisibility === "visible") {
       return this.drawFrame(this.syncDenseEntities(entityManager));
+    }
+    if (sceneVisibility === "hidden") {
+      return this.drawFrame(0);
     }
 
     const visibleCount = cullingManager.cullEntities(entityManager, cameraController);

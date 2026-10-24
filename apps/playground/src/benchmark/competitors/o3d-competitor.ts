@@ -79,17 +79,30 @@ export class O3dCompetitor implements IBenchmarkCompetitor {
     return this.render()
   }
 
+  /** Batched: one `removeNodes` and one `addNodes` per frame, two Wasm calls in all. */
   renderChurnFrame(removeCount: number, spawnCount: number): FrameTelemetry {
     const scene = this.scene!
+    const removed = this.scratchIds(removeCount)
     for (let i = 0; i < removeCount; i++) {
       const key = this.pool.takeRandom()
-      scene.removeNode(this.idOfKey.get(key)!)
+      removed[i] = this.idOfKey.get(key)!
       this.idOfKey.delete(key)
     }
+    scene.removeNodes(removed)
+
+    const batch = this.spawnBatch(spawnCount)
     for (let i = 0; i < spawnCount; i++) {
       const key = this.pool.spawnKey()
+      batch.keys[i] = key
       this.data.spawnEntity(key, this.position, this.scale, this.color)
-      this.add(key, this.position, this.scale, this.color)
+      batch.positions.set(this.position, i * 3)
+      batch.scales.set(this.scale, i * 3)
+      batch.colors.set(this.color, i * 3)
+    }
+    const ids = scene.addNodes(batch)
+    for (let i = 0; i < spawnCount; i++) {
+      this.idOfKey.set(batch.keys[i]!, ids[i]!)
+      this.keyOfId[ids[i]!] = batch.keys[i]!
     }
     return this.render()
   }
@@ -111,6 +124,28 @@ export class O3dCompetitor implements IBenchmarkCompetitor {
   dispose(): void {
     this.scene?.destroy()
     this.scene = null
+  }
+
+  private removedIds = new Uint32Array(0)
+  private batch = { keys: new Uint32Array(0), positions: new Float32Array(0), scales: new Float32Array(0), colors: new Float32Array(0) }
+
+  /** Reused per-frame ID buffer, so churn allocates nothing per frame. */
+  private scratchIds(count: number): Uint32Array {
+    if (this.removedIds.length !== count) this.removedIds = new Uint32Array(count)
+    return this.removedIds
+  }
+
+  /** Reused per-frame spawn arrays. */
+  private spawnBatch(count: number) {
+    if (this.batch.keys.length !== count) {
+      this.batch = {
+        keys: new Uint32Array(count),
+        positions: new Float32Array(count * 3),
+        scales: new Float32Array(count * 3),
+        colors: new Float32Array(count * 3),
+      }
+    }
+    return this.batch
   }
 
   private add(key: number, position: Vec3, scale: Vec3, color: Vec3): void {

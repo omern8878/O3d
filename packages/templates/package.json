@@ -1,5 +1,5 @@
 {
-  "name": "@engine/templates",
+  "name": "@omern/o3d",
   "version": "1.0.0",
   "description": "Zero-copy Rust/WebAssembly + WebGPU instanced renderer: SceneTemplate, ECS views, dirty uploads, frustum culling and picking.",
   "license": "MIT",
