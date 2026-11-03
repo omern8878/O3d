@@ -13,7 +13,7 @@ fn assert_close(actual: &[f32], expected: &[f32]) {
     }
 }
 
-/// Default camera: eye (0, 0, 10) looking at the origin, near 0.1, far 1000.
+/// Default camera: eye (0, 0, 10) looking at the origin, near 0.1, far 10_000.
 /// In `Ortho2D` mode it sees x, y in [-100, 100] when `aspect == 1`.
 fn ortho_frustum() -> Frustum {
     Frustum::from_view_proj(Camera::new(1.0).view_proj_mat())
@@ -58,9 +58,9 @@ fn ortho_planes_are_axis_aligned_and_face_inward() {
     assert_close(&[right.normal[0], right.d], &[-1.0, 100.0]);
     assert_close(&[bottom.normal[1], bottom.d], &[1.0, 100.0]);
     assert_close(&[top.normal[1], top.d], &[-1.0, 100.0]);
-    // Eye at z = 10: near plane at z = 9.9 facing -Z, far plane at z = -990 facing +Z.
+    // Eye at z = 10: near plane at z = 9.9 facing -Z, far plane at z = -9990 facing +Z.
     assert_close(&[near.normal[2], near.d], &[-1.0, 9.9]);
-    assert_close(&[far.normal[2], far.d], &[1.0, 990.0]);
+    assert_close(&[far.normal[2], far.d], &[1.0, 9_990.0]);
 }
 
 #[test]
@@ -126,8 +126,8 @@ fn ortho_near_plane_uses_the_zero_to_one_depth_range() {
 
 #[test]
 fn ortho_culls_beyond_the_far_plane() {
-    assert!(ortho_frustum().intersects_sphere([0.0, 0.0, -980.0], 1.0));
-    assert!(!ortho_frustum().intersects_sphere([0.0, 0.0, -1000.0], 1.0));
+    assert!(ortho_frustum().intersects_sphere([0.0, 0.0, -9_980.0], 1.0));
+    assert!(!ortho_frustum().intersects_sphere([0.0, 0.0, -10_000.0], 1.0));
 }
 
 #[test]
@@ -152,8 +152,8 @@ fn perspective_culls_points_behind_the_camera() {
 fn perspective_culls_points_beyond_the_far_plane() {
     let frustum = perspective_frustum();
 
-    assert!(!frustum.intersects_sphere([0.0, 0.0, -1100.0], 0.1));
-    assert!(frustum.intersects_sphere([0.0, 0.0, -980.0], 0.1));
+    assert!(!frustum.intersects_sphere([0.0, 0.0, -11_000.0], 0.1));
+    assert!(frustum.intersects_sphere([0.0, 0.0, -5_000.0], 0.1));
 }
 
 #[test]

@@ -191,7 +191,8 @@ fn perspective_zoom_is_limited_by_near_and_far() {
     assert_close(&[distance(camera.eye, camera.target)], &[0.2]);
 
     camera.zoom_by_factor(1.0e9);
-    assert_close(&[distance(camera.eye, camera.target)], &[900.0]);
+    // Default far 10_000 × MAX_ORBIT_RADIUS_IN_FARS (0.9).
+    assert_close(&[distance(camera.eye, camera.target)], &[9_000.0]);
 }
 
 #[test]
