@@ -161,7 +161,7 @@ impl Camera {
     /// focus distance so 2D and 3D move at a 1:1 cursor feel. Ignored for a
     /// non-finite or non-positive viewport height.
     pub fn pan_by_pixels(&mut self, dx_px: f32, dy_px: f32, viewport_height_px: f32) {
-        if !dx_px.is_finite() || !dy_px.is_finite() || !(viewport_height_px > 0.0) {
+        if !dx_px.is_finite() || !dy_px.is_finite() || viewport_height_px <= 0.0 {
             return;
         }
         let world_per_pixel = self.visible_half_height() * 2.0 / viewport_height_px;

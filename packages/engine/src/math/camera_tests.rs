@@ -517,9 +517,7 @@ fn zoom_toward_ndc_keeps_the_cursor_world_point_stable() {
     let before = {
         let ray = camera.unproject_ndc(ndc[0], ndc[1]);
         // Ortho: ray origin is already on the near plane; intersect z = 0.
-        let [ox, oy, oz, dx, dy, dz] = [
-            ray[0], ray[1], ray[2], ray[3], ray[4], ray[5],
-        ];
+        let [ox, oy, oz, dx, dy, dz] = [ray[0], ray[1], ray[2], ray[3], ray[4], ray[5]];
         let t = -oz / dz;
         [ox + dx * t, oy + dy * t, 0.0]
     };
