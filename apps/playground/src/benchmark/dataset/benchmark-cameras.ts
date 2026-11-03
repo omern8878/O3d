@@ -2,10 +2,10 @@ import type { BenchCamera, SceneDataset, Vec3 } from '../competitor.types.ts'
 import { frustumPlanes, sphereInFrustum, viewProjection } from '../math/camera-math.ts'
 import { STAR_OUTER_RADIUS } from './benchmark-dataset.ts'
 
-/** Matches the engine camera: 45 degree FOV, near 0.1, far 1000. */
+/** Matches the engine camera: 45 degree FOV, near 0.1, far 10_000. */
 const FOV_Y = Math.PI / 4
 const NEAR = 0.1
-const FAR = 1000
+const FAR = 10_000
 export const BENCH_ASPECT = 16 / 9
 /** `radius / sin(fov / 2)` plus margin: the whole starfield stays in view while orbiting. */
 const OVERVIEW_DISTANCE = (STAR_OUTER_RADIUS / Math.sin(FOV_Y / 2)) * 1.07
