@@ -1,10 +1,10 @@
 import type { SceneTemplate } from '@engine/templates'
 import { shouldPanCamera } from './camera-pan-gesture.ts'
+import { clientToNdc, wheelZoomFactor } from './wheel-zoom.ts'
 
 /** Movement (CSS px) below which a press-and-release counts as a tap. */
 const TAP_SLOP_PX = 5
-const ORBIT_RAD_PER_PX = 0.008
-const WHEEL_ZOOM_PER_PIXEL = 0.0015
+const ORBIT_RAD_PER_PX = 0.005
 
 export type PointerControlHandlers = {
   /** A tap or click that did not drag. */
@@ -15,7 +15,8 @@ export type PointerControlHandlers = {
 
 /**
  * Mouse and touch camera controls: drag to orbit (3D) or pan (2D, or with
- * Shift / Ctrl / Cmd / right button in 3D), wheel or pinch to zoom, tap to pick.
+ * Shift / Ctrl / Cmd / right button in 3D), wheel or pinch to zoom toward the
+ * cursor, tap to pick.
  */
 export class PointerControls {
   private readonly canvas: HTMLCanvasElement
@@ -67,6 +68,10 @@ export class PointerControls {
       this.dragged = true
       this.handlers.onCameraInteraction()
     }
+    // Ignore moves until the drag has cleared the tap slop, otherwise a tap
+    // can nudge the camera by a few pixels and feel like a jump.
+    if (!this.dragged) return
+
     const camera = this.getScene().getCameraController()
     const pan = shouldPanCamera(camera.getMode(), {
       shiftKey: event.shiftKey,
@@ -89,14 +94,23 @@ export class PointerControls {
   private readonly onWheel = (event: WheelEvent) => {
     event.preventDefault()
     this.handlers.onCameraInteraction()
-    this.getScene().getCameraController().zoom(Math.exp(event.deltaY * WHEEL_ZOOM_PER_PIXEL))
+    const factor = wheelZoomFactor(event.deltaY, event.deltaMode)
+    if (factor === 1) return
+    const { ndcX, ndcY } = clientToNdc(event.clientX, event.clientY, this.canvas.getBoundingClientRect())
+    this.getScene().getCameraController().zoomTowardNdc(factor, ndcX, ndcY)
   }
 
   private pinch(): void {
     const distance = this.currentPinchDistance()
     if (this.pinchDistance > 0 && distance > 0) {
       this.handlers.onCameraInteraction()
-      this.getScene().getCameraController().zoom(this.pinchDistance / distance)
+      const mid = this.pinchMidpoint()
+      if (mid) {
+        const { ndcX, ndcY } = clientToNdc(mid.x, mid.y, this.canvas.getBoundingClientRect())
+        this.getScene().getCameraController().zoomTowardNdc(this.pinchDistance / distance, ndcX, ndcY)
+      } else {
+        this.getScene().getCameraController().zoom(this.pinchDistance / distance)
+      }
     }
     this.pinchDistance = distance
   }
@@ -104,5 +118,10 @@ export class PointerControls {
   private currentPinchDistance(): number {
     const [a, b] = [...this.pointers.values()]
     return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0
+  }
+
+  private pinchMidpoint(): { x: number; y: number } | null {
+    const [a, b] = [...this.pointers.values()]
+    return a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : null
   }
 }

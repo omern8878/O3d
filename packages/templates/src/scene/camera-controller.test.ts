@@ -127,6 +127,37 @@ describe("CameraController", () => {
     assert.ok(Number.isFinite(x) && Number.isFinite(y));
   });
 
+  it("zoomTowardNdc keeps the world point under the cursor stable", () => {
+    const controller = new CameraController({ aspect: 1 });
+    const before = toClip(controller, [50, -25, 0]);
+    assert.ok(close(before[0], 0.5) && close(before[1], -0.25));
+
+    controller.zoomTowardNdc(0.5, 0.5, -0.25);
+
+    const after = toClip(controller, [50, -25, 0]);
+    assert.ok(close(after[0], 0.5), `x was ${after[0]}`);
+    assert.ok(close(after[1], -0.25), `y was ${after[1]}`);
+  });
+
+  it("panByPixels in 3D follows the camera axes, not world XY", () => {
+    const controller = new CameraController({
+      mode: "3d",
+      aspect: 1,
+      position: { x: 0, y: 0, z: 20 },
+      target: { x: 0, y: 0, z: 0 },
+    });
+    controller.orbit(Math.PI / 2, 0); // eye on +X
+    // Visible half-height at distance 20 and FOV 45° ≈ 8.28; 200px → ~0.0828 wu/px.
+    // Drag down 100px → slide along +camera-up (+Y) by ~8.28.
+    controller.panByPixels(0, 100, 200);
+
+    const [fx] = controller.getForward();
+    assert.ok(Math.abs(fx + 1) < 1e-4, "still looking from +X");
+    const clip = toClip(controller, [0, 0, 0]);
+    // Origin should have moved down on screen (negative NDC y).
+    assert.ok(clip[1]! < -0.5, `y was ${clip[1]}`);
+  });
+
   it("zoom() zooms the 2D camera and orbit() keeps the 3D target centered", () => {
     const controller = new CameraController({ mode: "3d" });
     controller.orbit(0.8, 0.4);

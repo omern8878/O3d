@@ -14,6 +14,12 @@ fn cross_follows_the_right_hand_rule() {
 }
 
 #[test]
+fn scale_and_length_match_the_euclidean_norm() {
+    assert_eq!(scale([1.0, -2.0, 3.0], 2.0), [2.0, -4.0, 6.0]);
+    assert_eq!(length([0.0, 3.0, 4.0]), 5.0);
+}
+
+#[test]
 fn normalize_returns_unit_vectors() {
     assert_eq!(normalize([0.0, 3.0, 4.0]), [0.0, 0.6, 0.8]);
 }
