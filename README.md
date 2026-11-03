@@ -400,7 +400,7 @@ The live playground opens on the vector cat. **Drop any `.svg` or `.obj` file an
   - *3D Wave* moves every particle: the full-buffer stress case, still one write.
   - *Turntable* orbits the camera: **0 instance bytes**.
   - *Freeze* stops all motion.
-- **Interact.** Drag to orbit (Shift or right-drag to pan), wheel or pinch to zoom and watch *Visible drawn* fall below *Total entities*. Click any part to raycast-pick it: the HUD shows its `EntityId` and layer, and the layer pulses gold.
+- **Interact.** Drag to orbit (Shift, Ctrl/Cmd, or right-drag to pan), wheel or pinch to zoom and watch *Visible drawn* fall below *Total entities*. Click any part to raycast-pick it: the HUD shows its `EntityId` and layer, and the layer pulses gold.
 - **Fallback.** Without a WebGPU adapter the same pipeline runs on a headless GPU context and a software rasterizer draws it. The HUD badges the active backend.
 
 ## Development
