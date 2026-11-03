@@ -9,7 +9,7 @@ const CAT_SHARE = 0.7
 const TAIL_SHARE = 0.01
 /** The cat's relief spans z = 0..~70; centering it keeps orbits balanced. */
 const CAT_Z_OFFSET = -30
-/** Starfield shell, sized so the overview camera sees every entity (far plane 1000). */
+/** Starfield shell, sized so the overview camera sees every entity (far plane 10_000). */
 export const STAR_INNER_RADIUS = 150
 export const STAR_OUTER_RADIUS = 250
 const STAR_SIZE = 1.6

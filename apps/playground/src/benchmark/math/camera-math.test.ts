@@ -6,7 +6,7 @@ import { CameraController, initEngine } from '@engine/templates'
 import type { BenchCamera } from '../competitor.types.ts'
 import { frustumPlanes, invert, multiply, sphereInFrustum, transformPoint, viewProjection } from './camera-math.ts'
 
-const CAMERA: BenchCamera = { eye: [30, 40, 300], target: [5, -10, 0], fovY: Math.PI / 4, aspect: 16 / 9, near: 0.1, far: 1000 }
+const CAMERA: BenchCamera = { eye: [30, 40, 300], target: [5, -10, 0], fovY: Math.PI / 4, aspect: 16 / 9, near: 0.1, far: 10_000 }
 
 describe('camera math', () => {
   before(async () => {

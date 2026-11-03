@@ -39,6 +39,11 @@ const MIN_ZOOM_FACTOR: f32 = 0.001;
 const MIN_ORBIT_RADIUS_IN_NEARS: f32 = 2.0;
 const MAX_ORBIT_RADIUS_IN_FARS: f32 = 0.9;
 
+/// Default clip planes. A long far plane lets orbit zoom pull back far from
+/// the fitted framing without clipping the scene.
+const DEFAULT_NEAR: f32 = 0.1;
+const DEFAULT_FAR: f32 = 10_000.0;
+
 /// How the camera projects the scene.
 #[wasm_bindgen]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -84,8 +89,8 @@ impl Camera {
             },
             fov_y: PI / 4.0,
             ortho_half_height: 100.0,
-            near: 0.1,
-            far: 1000.0,
+            near: DEFAULT_NEAR,
+            far: DEFAULT_FAR,
             view_proj: Mat4::identity(),
             orbit_enabled: true,
             azimuth_locked: false,
