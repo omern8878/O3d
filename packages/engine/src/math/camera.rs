@@ -11,7 +11,7 @@ use super::input_guard::{is_valid_vec3, MAX_COORDINATE};
 use super::mat4::Mat4;
 use super::ray::Ray;
 use super::spherical::Spherical;
-use super::vec3::{add, normalize, sub};
+use super::vec3::{add, cross, dot, length, normalize, scale, sub};
 
 /// Smallest allowed orthographic half-height; keeps the projection invertible.
 const MIN_ORTHO_HALF_HEIGHT: f32 = 0.0001;
@@ -141,14 +141,32 @@ impl Camera {
     /// Slides the camera and its target together in the XY plane.
     /// Ignored if the delta is non-finite or would leave the valid range.
     pub fn pan_2d(&mut self, dx: f32, dy: f32) {
-        let eye = [self.eye[0] + dx, self.eye[1] + dy, self.eye[2]];
-        let target = [self.target[0] + dx, self.target[1] + dy, self.target[2]];
-        if !is_valid_vec3(eye) || !is_valid_vec3(target) {
+        self.translate_eye_and_target([dx, dy, 0.0]);
+    }
+
+    /// Slides eye and target in the camera's local right / up plane so a
+    /// screen-space drag keeps the world under the cursor. `dx` / `dy` are
+    /// world units along camera-right and camera-up.
+    pub fn pan_view(&mut self, dx: f32, dy: f32) {
+        if !dx.is_finite() || !dy.is_finite() {
             return;
         }
-        self.eye = eye;
-        self.target = target;
-        self.update_view_proj();
+        let Some((right, up)) = self.view_right_and_up() else {
+            return;
+        };
+        self.translate_eye_and_target(add(scale(right, dx), scale(up, dy)));
+    }
+
+    /// Pans by a screen-space pixel drag. Uses the visible world height at the
+    /// focus distance so 2D and 3D move at a 1:1 cursor feel. Ignored for a
+    /// non-finite or non-positive viewport height.
+    pub fn pan_by_pixels(&mut self, dx_px: f32, dy_px: f32, viewport_height_px: f32) {
+        if !dx_px.is_finite() || !dy_px.is_finite() || !(viewport_height_px > 0.0) {
+            return;
+        }
+        let world_per_pixel = self.visible_half_height() * 2.0 / viewport_height_px;
+        // Screen +x is right, +y is down; pan_view uses camera-up for +y.
+        self.pan_view(-dx_px * world_per_pixel, dy_px * world_per_pixel);
     }
 
     /// Orbits the eye around `target` on a sphere, keeping the distance.
@@ -266,6 +284,24 @@ impl Camera {
         self.update_view_proj();
     }
 
+    /// Zooms like [`Camera::zoom_by_factor`], then pans so the world point that
+    /// was under `(ndc_x, ndc_y)` stays there. This is zoom-to-cursor instead
+    /// of zoom-to-orbit-target. Non-finite inputs are ignored.
+    pub fn zoom_toward_ndc(&mut self, factor: f32, ndc_x: f32, ndc_y: f32) {
+        if !factor.is_finite() || !ndc_x.is_finite() || !ndc_y.is_finite() {
+            return;
+        }
+        let before = self.anchor_on_target_plane(ndc_x, ndc_y);
+        self.zoom_by_factor(factor);
+        let Some(before) = before else {
+            return;
+        };
+        let Some(after) = self.anchor_on_target_plane(ndc_x, ndc_y) else {
+            return;
+        };
+        self.translate_eye_and_target(sub(before, after));
+    }
+
     /// World units from the view center to the top edge in `Ortho2D` mode.
     pub fn ortho_half_height(&self) -> f32 {
         self.ortho_half_height
@@ -291,6 +327,70 @@ impl Camera {
     pub(crate) fn ray_through_ndc(&self, ndc_x: f32, ndc_y: f32) -> Option<Ray> {
         let inv_view_proj = self.view_proj.inverse()?;
         Ray::from_ndc(ndc_x, ndc_y, &inv_view_proj)
+    }
+
+    /// World units from the view centre to the top edge at the focus distance.
+    fn visible_half_height(&self) -> f32 {
+        match self.mode {
+            ProjectionMode::Ortho2D => self.ortho_half_height,
+            ProjectionMode::Perspective3D => {
+                length(sub(self.eye, self.target)) * (self.fov_y * 0.5).tan()
+            }
+        }
+    }
+
+    /// Camera-local right and up axes, or `None` if the view is degenerate.
+    fn view_right_and_up(&self) -> Option<([f32; 3], [f32; 3])> {
+        let forward = normalize(sub(self.target, self.eye));
+        if length(forward) < 1e-6 {
+            return None;
+        }
+        let mut right = cross(forward, self.up);
+        if length(right) < 1e-6 {
+            // Looking along world up: pick a stable horizontal right.
+            right = cross(forward, [0.0, 0.0, 1.0]);
+            if length(right) < 1e-6 {
+                right = cross(forward, [1.0, 0.0, 0.0]);
+            }
+        }
+        let right = normalize(right);
+        if length(right) < 1e-6 {
+            return None;
+        }
+        let up = normalize(cross(right, forward));
+        if length(up) < 1e-6 {
+            return None;
+        }
+        Some((right, up))
+    }
+
+    /// World point under an NDC pixel on the plane through the look-at target.
+    fn anchor_on_target_plane(&self, ndc_x: f32, ndc_y: f32) -> Option<[f32; 3]> {
+        let ray = self.ray_through_ndc(ndc_x, ndc_y)?;
+        let forward = normalize(sub(self.target, self.eye));
+        if length(forward) < 1e-6 {
+            return None;
+        }
+        let denom = dot(ray.direction, forward);
+        if denom.abs() < 1e-6 {
+            return None;
+        }
+        let t = dot(sub(self.target, ray.origin), forward) / denom;
+        Some(add(ray.origin, scale(ray.direction, t)))
+    }
+
+    fn translate_eye_and_target(&mut self, delta: [f32; 3]) {
+        if !delta.iter().all(|v| v.is_finite()) {
+            return;
+        }
+        let eye = add(self.eye, delta);
+        let target = add(self.target, delta);
+        if !is_valid_vec3(eye) || !is_valid_vec3(target) {
+            return;
+        }
+        self.eye = eye;
+        self.target = target;
+        self.update_view_proj();
     }
 
     fn projection(&self) -> Mat4 {

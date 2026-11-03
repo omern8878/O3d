@@ -491,3 +491,41 @@ fn xy_plane_lock_faces_the_plane_and_freezes_orbit() {
     camera.orbit_3d(0.5, 0.0);
     assert!(camera.forward()[0].abs() > 0.1);
 }
+
+#[test]
+fn pan_by_pixels_matches_ortho_world_units() {
+    // half height 100 over a 200px viewport -> 1 world unit per pixel.
+    let mut camera = Camera::new(1.0);
+    camera.pan_by_pixels(10.0, 0.0, 200.0);
+    assert_close(&to_clip(&camera, [0.0, 0.0, 0.0])[..2], &[0.1, 0.0]);
+}
+
+#[test]
+fn pan_view_follows_the_tilted_camera_axes() {
+    let mut camera = camera_3d_at([0.0, 0.0, 10.0]);
+    camera.orbit_3d(FRAC_PI_2, 0.0); // eye on +X, looking at origin
+    camera.pan_view(0.0, 5.0); // slide along camera-up (+Y)
+
+    assert_close(&camera.target, &[0.0, 5.0, 0.0]);
+    assert_close(&camera.eye, &[10.0, 5.0, 0.0]);
+}
+
+#[test]
+fn zoom_toward_ndc_keeps_the_cursor_world_point_stable() {
+    let mut camera = Camera::new(1.0);
+    let ndc = [0.5_f32, -0.25];
+    let before = {
+        let ray = camera.unproject_ndc(ndc[0], ndc[1]);
+        // Ortho: ray origin is already on the near plane; intersect z = 0.
+        let [ox, oy, oz, dx, dy, dz] = [
+            ray[0], ray[1], ray[2], ray[3], ray[4], ray[5],
+        ];
+        let t = -oz / dz;
+        [ox + dx * t, oy + dy * t, 0.0]
+    };
+
+    camera.zoom_toward_ndc(0.5, ndc[0], ndc[1]);
+
+    let after_clip = to_clip(&camera, before);
+    assert_close(&after_clip[..2], &ndc);
+}

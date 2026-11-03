@@ -79,13 +79,11 @@ export class CameraController {
   }
 
   /**
-   * Pans a 2D camera by a screen-space drag, so the world follows the cursor:
-   * dragging right moves the scene right, dragging down moves it down.
+   * Pans by a screen-space drag so the world follows the cursor in both 2D
+   * and 3D (camera-right / camera-up, scaled to the visible height).
    */
   panByPixels(deltaX: number, deltaY: number, viewportHeight: number): void {
-    const worldPerPixel =
-      (this.wasmCamera.ortho_half_height() * 2) / Math.max(viewportHeight, 1);
-    this.wasmCamera.pan_2d(-deltaX * worldPerPixel, deltaY * worldPerPixel);
+    this.wasmCamera.pan_by_pixels(deltaX, deltaY, viewportHeight);
     this.dirty = true;
   }
 
@@ -154,6 +152,15 @@ export class CameraController {
   /** Multiplies the zoom level; `factor < 1` zooms in, `> 1` zooms out. */
   zoom(factor: number): void {
     this.wasmCamera.zoom_by_factor(factor);
+    this.dirty = true;
+  }
+
+  /**
+   * Zooms like {@link CameraController.zoom}, then pans so the world under
+   * `(ndcX, ndcY)` (`[-1, 1]`, `+Y` up) stays put — zoom-to-cursor.
+   */
+  zoomTowardNdc(factor: number, ndcX: number, ndcY: number): void {
+    this.wasmCamera.zoom_toward_ndc(factor, ndcX, ndcY);
     this.dirty = true;
   }
 
