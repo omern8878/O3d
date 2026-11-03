@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "build:wasm": "cd packages/engine && wasm-pack build --target web",
-    "build": "npm run build:wasm && npm run build -w @engine/templates && npm run build -w playground",
+    "build": "npm run build:wasm && npm run build -w @omernach/o3d && npm run build -w playground",
     "test": "npm run test --workspaces --if-present",
     "dev": "npm run dev -w playground",
     "preview": "npm run preview -w playground",

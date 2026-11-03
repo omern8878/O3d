@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@engine/core": "*",
-    "@engine/templates": "*"
+    "@omernach/o3d": "*"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
