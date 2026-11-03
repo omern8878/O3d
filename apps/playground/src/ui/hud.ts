@@ -165,7 +165,7 @@ export class Hud {
     this.status = this.element('p', 'status', 'status')
     const hint = document.createElement('p')
     hint.className = 'hint'
-    hint.textContent = 'Drop any .svg or .obj on the page · Drag to orbit · Shift / right-drag to pan · Wheel or pinch to zoom · Click to pick'
+    hint.textContent = 'Drop any .svg or .obj on the page · Drag to orbit · Shift / Ctrl / Cmd / right-drag to pan · Wheel or pinch to zoom · Click to pick'
 
     const controls = document.createElement('section')
     controls.className = 'controls'

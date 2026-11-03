@@ -1,4 +1,5 @@
 import type { SceneTemplate } from '@engine/templates'
+import { shouldPanCamera } from './camera-pan-gesture.ts'
 
 /** Movement (CSS px) below which a press-and-release counts as a tap. */
 const TAP_SLOP_PX = 5
@@ -14,7 +15,7 @@ export type PointerControlHandlers = {
 
 /**
  * Mouse and touch camera controls: drag to orbit (3D) or pan (2D, or with
- * Shift / right button in 3D), wheel or pinch to zoom, tap to pick.
+ * Shift / Ctrl / Cmd / right button in 3D), wheel or pinch to zoom, tap to pick.
  */
 export class PointerControls {
   private readonly canvas: HTMLCanvasElement
@@ -67,7 +68,12 @@ export class PointerControls {
       this.handlers.onCameraInteraction()
     }
     const camera = this.getScene().getCameraController()
-    const pan = camera.getMode() === '2d' || event.shiftKey || (event.buttons & 2) !== 0
+    const pan = shouldPanCamera(camera.getMode(), {
+      shiftKey: event.shiftKey,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      buttons: event.buttons,
+    })
     if (pan) camera.panByPixels(dx, dy, this.canvas.clientHeight)
     else camera.orbit(-dx * ORBIT_RAD_PER_PX, dy * ORBIT_RAD_PER_PX)
   }
